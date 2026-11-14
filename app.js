@@ -215,7 +215,7 @@ async function submitAuth(form) {
   if(!state.client){toast('Public registration requires a configured Supabase project.','error');return;}
   const d=new FormData(form);const email=String(d.get('email')||'').trim(),password=String(d.get('password')||'');
   if(!email||password.length<8){toast('Enter an email and password with at least 8 characters.','error');return;}
-  const {data,error}=state.authMode==='signup' ? await state.client.auth.signUp({email,password}) : await state.client.auth.signInWithPassword({email,password});
+  const {data,error}=state.authMode==='signup' ? await state.client.auth.signUp({email,password,options:{emailRedirectTo:window.location.origin}}) : await state.client.auth.signInWithPassword({email,password});
   if(error)throw new Error(error.message);
   if(data?.user&&!data.session)toast('Account created. Check your email for a confirmation link.','success');
   else toast(state.authMode==='signup'?'Account created and signed in.':'Signed in.','success');
