@@ -23,8 +23,13 @@ function renderTrend(host, rows, opponent, settings) {
     const pct=n=>Math.round(n*100/vals.length)+'%';
     const summary=mark===null?'Enter a prop line to see historical hit rates.':'Over '+mark+': '+over+'/'+vals.length+' ('+pct(over)+') · Under: '+under+'/'+vals.length+' ('+pct(under)+') · Push: '+(vals.length-over-under);
     const bars=subset.map((r,i)=>{
-      const val=vals[i], fill=mark===null?'#91adcf':val>mark?'#b8f34c':val<mark?'#f58e85':'#9caabe';
-      return '<div style="display:grid;grid-template-columns:96px 1fr 30px;gap:10px;align-items:center;margin:5px 0"><small>'+safe(r.date.slice(5)+' '+r.venue+' '+r.opponent)+'</small><div style="height:10px;background:#243144;position:relative;border-radius:3px"><div style="height:100%;width:'+val/scale*100+'%;background:'+fill+';border-radius:3px"></div>'+(mark===null?'':'<i style="position:absolute;top:-2px;bottom:-2px;border-left:1px solid white;left:'+mark/scale*100+'%"></i>')+'</div><b>'+val+'</b></div>';
+      const val = vals[i];
+      const outcome = mark === null ? 'neutral' : val > mark ? 'over' : val < mark ? 'under' : 'push';
+      return `<div class="trend-row" data-outcome="${outcome}">
+        <small>${safe(r.date.slice(5)+' '+r.venue+' '+r.opponent)}</small>
+        <div class="trend-track"><span style="width:${val/scale*100}%"></span>${mark===null?'':`<i style="left:${mark/scale*100}%"></i>`}</div>
+        <b>${val}</b><small class="trend-outcome">${mark===null?'':outcome}</small>
+      </div>`;
     }).join('');
     host.querySelector('[data-chart]').innerHTML=subset.length?'<p>'+safe(stat)+' · '+safe(summary)+'</p><div style="max-height:320px;overflow:auto">'+bars+'</div>':'<p>No qualifying games in this window.</p>';
   }
@@ -97,7 +102,17 @@ class PlayerStats extends HTMLElement {
       windows.push(summary('Season to date',rows),summary('vs '+opponent.abbr,vs));
       const gameTable=list=>table(['Date','Opponent','PTS','REB','AST'],list.map(r=>[r.date,r.venue+' '+r.opponent,...r.values]));
       const checked=new Date(log.updated).toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});
-      result.innerHTML='<h3>'+safe(this.field('player').selectedOptions[0].textContent)+' vs '+safe(opponent.name)+'</h3><p class="muted">'+safe(game.status)+' · Regular-season appearances before '+safe(date)+'</p>'+table(['Per-game averages','Games','PTS','REB','AST'],windows)+'<section data-trend></section><details><summary>Games against '+safe(opponent.abbr)+' ('+vs.length+')</summary>'+(vs.length?gameTable(vs):'<p>No prior meeting played this season.</p>')+'</details><details><summary>Season game log ('+rows.length+')</summary>'+gameTable(rows)+'</details><p class="muted small-text">ESPN game logs · Checked '+safe(checked)+' ET</p>';
+      const name = this.field('player').selectedOptions[0].textContent;
+      const initials = name.split(/\s+/).map(word=>word[0]).slice(0,2).join('');
+      const header = `<header class="stat-profile"><div class="stat-portrait"><span aria-hidden="true">${safe(initials)}</span></div>
+        <div><h3>${safe(name)}</h3><strong>vs ${safe(opponent.name)}</strong><small>${safe(game.status)}</small></div></header>`;
+      result.innerHTML=header+'<p class="muted">Regular-season appearances before '+safe(date)+'</p>'+table(['Per-game averages','Games','PTS','REB','AST'],windows)+'<section data-trend></section><details><summary>Games against '+safe(opponent.abbr)+' ('+vs.length+')</summary>'+(vs.length?gameTable(vs):'<p>No prior meeting played this season.</p>')+'</details><details><summary>Season game log ('+rows.length+')</summary>'+gameTable(rows)+'</details><p class="muted small-text">ESPN game logs · Checked '+safe(checked)+' ET</p>';
+      const portrait = new Image();
+      portrait.alt = name;
+      portrait.onload = () => portrait.parentElement?.classList.add('loaded');
+      portrait.onerror = () => portrait.remove();
+      result.querySelector('.stat-portrait').append(portrait);
+      portrait.src = 'https://a.espncdn.com/i/headshots/nba/players/full/' + encodeURIComponent(player) + '.png';
       renderTrend(result.querySelector('[data-trend]'),rows,opponent,this.chartSettings);
     } catch(err) {
       if(!controller.signal.aborted) result.textContent='Game data is unavailable. Try Refresh.';
