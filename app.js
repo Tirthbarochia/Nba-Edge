@@ -1,3 +1,4 @@
+import './insights.js';
 import './lines-board.js';
 import './player-search.js';
 import './player-stats.js';
@@ -31,7 +32,7 @@ function playerCell(p){return `<div class="player-cell"><div class="player-avata
 function ratingPill(r){return pill(r,r==='Candidate'?'lime':r==='Pass'?'red':r==='Conditional'?'amber':'')}
 function trend(p){const pct=p.hits/p.n*100;return `<div class="hit-main">${p.hits}/${p.n} <span class="muted small-text">(${percent(p.hits,p.n)})</span></div><div class="hit-progress ${p.hits<7?'warn':''}"><i style="width:${pct}%"></i></div>`}
 function renderDashboard(){
-  return `<div class="page">${pageHeader('NBA RESEARCH','Player line research','Explore a matchup, compare recent games, and test your line.', '<button class="btn ghost" data-view="odds">Compare market odds</button>')}<nba-lines-board></nba-lines-board><nba-player-search></nba-player-search><nba-player-stats></nba-player-stats></div>`;
+  return `<div class="page">${pageHeader('NBA RESEARCH','Player line research','Explore a matchup, compare recent games, and test your line.', '<button class="btn ghost" data-view="odds">Compare market odds</button>')}<nba-insights></nba-insights><nba-lines-board></nba-lines-board><nba-player-search></nba-player-search><nba-player-stats></nba-player-stats></div>`;
 }
 function renderAnalyzer(){return `<div class="page">${pageHeader('PLAYER PROP INTELLIGENCE','Research before you select.','Inspect historical thresholds and run a descriptive check on any player using actual recent stat totals.')}<nba-player-search></nba-player-search><nba-player-stats></nba-player-stats><div class="section-spacer"></div><details><summary>Archived research and manual stat checker</summary>${sampleNotice()}
 <div class="toolbar"><input id="propSearch" class="search" placeholder="⌕  Search player, team or matchup…" value="${esc(state.query)}" aria-label="Search research props"/><div class="filter-row" id="marketFilters">${['ALL','PTS','REB','AST','PRA','P+R','3PM'].map(f=>`<button data-action="filter" data-filter="${f}" class="filter-pill ${state.filter===f?'active':''}">${f}</button>`).join('')}</div></div>
