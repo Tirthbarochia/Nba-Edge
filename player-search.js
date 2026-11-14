@@ -1,3 +1,4 @@
+import {gameChart} from './game-chart.js';
 const escape = v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const normalize=v=>v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
 let directory;
@@ -69,11 +70,7 @@ class PlayerSearch extends HTMLElement {
     const hasLine=this.line.value!==''&&this.line.validity.valid;
     const line=Number(this.line.value), over=games.filter(g=>g.value>line).length;
     const avg=games.length?(games.reduce((s,g)=>s+g.value,0)/games.length).toFixed(1):'—';
-    this.panel.innerHTML=`<div class="stat-profile"><div style="flex:1;padding:12px 0"><h3>${escape(d.name)}</h3><strong>${escape(d.club)} · ${d.opponent?'vs '+escape(d.opponent):'No scheduled game'}</strong><small>${escape(d.status||d.date)}</small><b style="font-size:clamp(23px,4vw,36px)">${hasLine&&games.length?Math.round(100*over/games.length)+'% over '+line:avg+' average'} </b><small>${hasLine?over+' of '+games.length+' games above your line':games.length+' games'} · ${escape(d.metric)}</small></div>${d.photo?'<img style="width:clamp(75px,25%,150px);align-self:end" alt="" src="'+escape(d.photo)+'">':''}</div><div style="display:flex;gap:5px;overflow-x:auto;padding:8px 0">${[...games].reverse().map(g=>{
-      const outcome=!hasLine?'':g.value>line?'Over':g.value<line?'Under':'Push';
-      const color={Over:'#4ade80',Under:'#fb6577',Push:'#c3ccda','':'#a7d8e9'}[outcome];
-      return `<div style="min-width:58px;padding:7px;text-align:center;background:#192b40;border-radius:8px;border-bottom:3px solid ${color}"><small>${escape(g.date.slice(5))}</small><br><b style="color:${color};font-size:20px">${g.value}</b><br><small>${escape(g.opponent)} ${outcome}</small>${g.minutes!=null?'<br><small>'+escape(g.minutes)+' min</small>':''}</div>`;
-    }).join('')}</div><small>ESPN · Completed regular-season games before ${escape(d.date)}</small>${d.aiAvailable&&hasLine&&games.length?'<p><button class="btn small" data-explain>Explain with AI</button></p><p data-answer aria-live="polite"></p>':''}`;
+    this.panel.innerHTML=`<div class="stat-profile"><div style="flex:1;padding:12px 0"><h3>${escape(d.name)}</h3><strong>${escape(d.club)} · ${d.opponent?'vs '+escape(d.opponent):'No scheduled game'}</strong><small>${escape(d.status||d.date)}</small><b style="font-size:clamp(23px,4vw,36px)">${hasLine&&games.length?Math.round(100*over/games.length)+'% over '+line:avg+' average'} </b><small>${hasLine?over+' of '+games.length+' games above your line':games.length+' games'} · ${escape(d.metric)}</small></div>${d.photo?'<img style="width:clamp(75px,25%,150px);align-self:end" alt="" src="'+escape(d.photo)+'">':''}</div>${gameChart(games,hasLine?line:null)}<small>ESPN · Completed regular-season games before ${escape(d.date)}</small>${d.aiAvailable&&hasLine&&games.length?'<p><button class="btn small" data-explain>Explain with AI</button></p><p data-answer aria-live="polite"></p>':''}`;
     const button=this.panel.querySelector('[data-explain]');
     if(button)button.onclick=async()=>{
       const answer=this.panel.querySelector('[data-answer]');button.disabled=true;answer.textContent='Preparing explanation…';

@@ -1,3 +1,4 @@
+import {gameChart} from './game-chart.js';
 const dayET = () => new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
 const safe = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const selection = {date:'',game:'',team:'',player:''};
@@ -17,21 +18,12 @@ function renderTrend(host, rows, opponent, settings) {
     const subset=period.value==='Opponent'?rows.filter(r=>r.opponentId===opponent.id):period.value==='Season'?rows:rows.slice(0,Number(period.value));
     const mark=line.value!=='' && line.validity.valid?Number(line.value):null;
     const vals=subset.map(r=>metric.value==='3'?r.values.reduce((a,b)=>a+b,0):r.values[Number(metric.value)]);
-    const scale=Math.max(1,...vals,mark||0);
     const over=vals.filter(v=>v>mark).length,under=vals.filter(v=>v<mark).length;
     const stat=metric.selectedOptions[0].textContent;
     const pct=n=>Math.round(n*100/vals.length)+'%';
     const summary=mark===null?'Enter a prop line to see historical hit rates.':'Over '+mark+': '+over+'/'+vals.length+' ('+pct(over)+') · Under: '+under+'/'+vals.length+' ('+pct(under)+') · Push: '+(vals.length-over-under);
-    const bars=subset.map((r,i)=>{
-      const val = vals[i];
-      const outcome = mark === null ? 'neutral' : val > mark ? 'over' : val < mark ? 'under' : 'push';
-      return `<div class="trend-row" data-outcome="${outcome}">
-        <small>${safe(r.date.slice(5)+' '+r.venue+' '+r.opponent)}</small>
-        <div class="trend-track"><span style="width:${val/scale*100}%"></span>${mark===null?'':`<i style="left:${mark/scale*100}%"></i>`}</div>
-        <b>${val}</b><small class="trend-outcome">${mark===null?'':outcome}</small>
-      </div>`;
-    }).join('');
-    host.querySelector('[data-chart]').innerHTML=subset.length?'<p>'+safe(stat)+' · '+safe(summary)+'</p><div style="max-height:320px;overflow:auto">'+bars+'</div>':'<p>No qualifying games in this window.</p>';
+    const games=subset.map((r,i)=>({date:r.date,opponent:r.venue+' '+r.opponent,value:vals[i]}));
+    host.querySelector('[data-chart]').innerHTML=subset.length?'<p>'+safe(stat)+' · '+safe(summary)+'</p>'+gameChart(games,mark):'<p>No qualifying games in this window.</p>';
   }
   host.oninput=draw;draw();
 }
