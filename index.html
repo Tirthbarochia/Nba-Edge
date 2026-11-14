@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#080e17" />
-  <meta name="description" content="NBA Edge — player prop research, Pick6 entry builder and transparent prediction tracking." />
+  <meta name="description" content="NBA Edge — player stats, matchup history and sportsbook line research." />
   <title>NBA Edge — Player Prop Research</title>
   <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg" />
   <link rel="stylesheet" href="./styles.css" />
@@ -22,20 +22,18 @@
         <button class="nav-link" data-view="analyzer"><span class="nav-icon">◈</span><span>Prop analyzer</span></button>
         <button class="nav-link" data-view="odds"><span class="nav-icon">⌁</span><span>Odds scanner</span></button>
         <button class="nav-link" data-view="live"><span class="nav-icon">◉</span><span>Live game data</span></button>
-        <button class="nav-link" data-view="builder"><span class="nav-icon">▤</span><span>Pick6 builder</span><span class="nav-count" id="navCount">0</span></button>
-        <button class="nav-link" data-view="tracking"><span class="nav-icon">◷</span><span>Prediction tracker</span></button>
       </nav>
       <div class="nav-label" style="margin-top:28px">ACCOUNT</div>
       <nav class="nav-list"><button class="nav-link" data-view="account"><span class="nav-icon">♙</span><span>My account</span></button></nav>
       <div class="side-bottom">
-        <div class="status-panel"><span class="status-dot"></span><div><strong id="connectionName">Research demo</strong><small id="connectionSub">No live market feed</small></div></div>
+        <div class="status-panel"><span class="status-dot"></span><div><strong id="connectionName">Research demo</strong><small id="connectionSub">Player stats and matchups</small></div></div>
         <div class="side-disclaimer">Research tools only. No guaranteed predictions or live DraftKings integration.</div>
       </div>
     </aside>
     <div class="main-area">
       <header class="topbar">
         <div class="top-left"><button class="mobile-menu" id="mobileMenu" aria-label="Toggle menu">☰</button><span class="breadcrumb">WORKSPACE <span>/</span> <b id="topCrumb">OVERVIEW</b></span></div>
-        <div class="top-actions"><span class="top-date" id="topDate"></span><span class="avatar" id="topAvatar">G</span><button id="topAccountButton" class="top-account">Guest demo</button></div>
+        <div class="top-actions"><span class="top-date" id="topDate"></span><span class="avatar" id="topAvatar">G</span><button id="topAccountButton" class="top-account">Guest</button></div>
       </header>
       <main id="mainContent" tabindex="-1" aria-live="polite"></main>
     </div>
