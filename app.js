@@ -32,7 +32,7 @@ function playerCell(p){return `<div class="player-cell"><div class="player-avata
 function ratingPill(r){return pill(r,r==='Candidate'?'lime':r==='Pass'?'red':r==='Conditional'?'amber':'')}
 function trend(p){const pct=p.hits/p.n*100;return `<div class="hit-main">${p.hits}/${p.n} <span class="muted small-text">(${percent(p.hits,p.n)})</span></div><div class="hit-progress ${p.hits<7?'warn':''}"><i style="width:${pct}%"></i></div>`}
 function renderDashboard(){
-  return `<div class="page">${pageHeader('NBA RESEARCH','Player line research','Explore a matchup, compare recent games, and test your line.', '<button class="btn ghost" data-view="odds">Compare market odds</button>')}<nba-insights></nba-insights><nba-lines-board></nba-lines-board><nba-player-search></nba-player-search><nba-player-stats></nba-player-stats></div>`;
+  return `<div class="page">${pageHeader('NBA RESEARCH','Player line research','Explore a matchup, compare recent games, and test your line.', '<button class="btn ghost" data-view="odds">Compare market odds</button>')}<nba-lines-board></nba-lines-board><nba-player-search></nba-player-search><nba-player-stats></nba-player-stats></div>`;
 }
 function renderAnalyzer(){return `<div class="page">${pageHeader('PLAYER PROP INTELLIGENCE','Research before you select.','Inspect historical thresholds and run a descriptive check on any player using actual recent stat totals.')}<nba-player-search></nba-player-search><nba-player-stats></nba-player-stats><div class="section-spacer"></div><details><summary>Archived research and manual stat checker</summary>${sampleNotice()}
 <div class="toolbar"><input id="propSearch" class="search" placeholder="⌕  Search player, team or matchup…" value="${esc(state.query)}" aria-label="Search research props"/><div class="filter-row" id="marketFilters">${['ALL','PTS','REB','AST','PRA','P+R','3PM'].map(f=>`<button data-action="filter" data-filter="${f}" class="filter-pill ${state.filter===f?'active':''}">${f}</button>`).join('')}</div></div>
@@ -43,8 +43,8 @@ function renderCustomAnalysisResult(){const r=state.customAnalysis;if(!r)return 
 
 function renderAccount(){return `<div class="page">${pageHeader('ACCOUNT & ACCESS',state.user?'Your NBA Edge account.':'Join NBA Edge.','Sign in to compare live sportsbook lines.')}<div class="auth-layout"><div class="card"><div class="card-header"><div><h2>${state.user?'Connected account':HAS_BACKEND?'Sign in or create an account':'Demo mode is available'}</h2><div class="card-subtitle">${HAS_BACKEND?'Supabase Auth · Email and password':'Configure Supabase to activate public registration'}</div></div></div><div class="card-body">${state.user?`<p>Signed in as <strong>${esc(state.user.email)}</strong></p><button class="btn ghost" data-action="logout" style="margin-top:16px">Sign out</button>`:HAS_BACKEND?`<div class="auth-switch"><button class="${state.authMode==='signup'?'active':''}" data-action="switch-auth" data-mode="signup">Create account</button><button class="${state.authMode==='signin'?'active':''}" data-action="switch-auth" data-mode="signin">Sign in</button></div><form id="authForm"><div class="field"><label>Email address</label><input name="email" type="email" autocomplete="email" required/></div><div class="field"><label>Password (8+ characters)</label><input name="password" type="password" minlength="8" autocomplete="${state.authMode==='signup'?'new-password':'current-password'}" required/></div><button class="btn primary" style="width:100%" type="submit">${state.authMode==='signup'?'Create account':'Sign in'}</button></form><p class="notice">If email confirmation is enabled, follow the verification link from Supabase before signing in.</p>`:`<div class="empty"><div class="empty-icon">♙</div><strong>Public registration needs a database</strong><p>Try the rest of the site now. For shared accounts, create a Supabase project, run the included SQL schema, and add the publishable configuration to config.js.</p></div>`}</div></div>
 </div></div>`}
-function render(){const views={dashboard:renderDashboard,analyzer:renderAnalyzer,odds:renderOdds,account:renderAccount,live:renderLive};$('#mainContent').innerHTML=(views[state.view]||renderDashboard)();const search=document.querySelector('nba-player-search');if(search)search.getToken=authToken;document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===state.view));$('#topCrumb').textContent=({dashboard:'OVERVIEW',analyzer:'PROP ANALYZER',odds:'MARKET SCANNER',live:'LIVE GAME DATA',account:'MY ACCOUNT'}[state.view]||'OVERVIEW');$('#topAccountButton').textContent=state.user?userName():'Guest';$('#topAvatar').textContent=state.user?initials(userName()):'G';$('#connectionName').textContent=state.user?'Account connected':HAS_BACKEND?'Registration enabled':'Research demo';$('#connectionSub').textContent=state.user?'Sportsbook scanner available':HAS_BACKEND?'Sign in for sportsbook odds':'Kalshi public market data';if(state.view==='analyzer'){renderResearchList();renderPropDetail()}}
-function navigate(view){state.view=view;$('#sidebar').classList.remove('open');render();window.scrollTo({top:0,behavior:'auto'});}
+function render(){const views={dashboard:renderDashboard,insights:()=>'<div class="page"><nba-insights></nba-insights></div>',analyzer:renderAnalyzer,odds:renderOdds,account:renderAccount,live:renderLive};$('#mainContent').innerHTML=(views[state.view]||renderDashboard)();const search=document.querySelector('nba-player-search');if(search)search.getToken=authToken;document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===state.view));$('#topCrumb').textContent=({dashboard:'OVERVIEW',insights:'TODAY’S INSIGHTS',analyzer:'PROP ANALYZER',odds:'MARKET SCANNER',live:'LIVE GAME DATA',account:'MY ACCOUNT'}[state.view]||'OVERVIEW');$('#topAccountButton').textContent=state.user?userName():'Guest';$('#topAvatar').textContent=state.user?initials(userName()):'G';$('#connectionName').textContent=state.user?'Account connected':HAS_BACKEND?'Registration enabled':'Research demo';$('#connectionSub').textContent=state.user?'Sportsbook scanner available':HAS_BACKEND?'Sign in for sportsbook odds':'Kalshi public market data';if(state.view==='analyzer'){renderResearchList();renderPropDetail()}}
+function navigate(view, syncUrl=true){if(syncUrl && location.hash!=='#'+view)history.pushState(null,'','#'+view);state.view=view;$('#sidebar').classList.remove('open');render();window.scrollTo({top:0,behavior:'auto'});}
 
 // LIVE MARKET DATA -----------------------------------------------------------
 function renderOdds() {
@@ -168,6 +168,12 @@ async function startAuth(){
 }
 
 // EVENT DELEGATION -----------------------------------------------------------
+document.addEventListener('research-line', event => {
+  navigate('analyzer');
+  const card = document.querySelector('nba-player-search');
+  card.openLine(event.detail.quote, event.detail.date);
+  card.scrollIntoView({behavior:'smooth', block:'start'});
+});
 document.addEventListener('click',async e=>{
   const viewBtn=e.target.closest('[data-view]');
   if(viewBtn){e.preventDefault();navigate(viewBtn.dataset.view);return;}
@@ -208,9 +214,9 @@ document.addEventListener('submit',async e=>{
 $('#mobileMenu').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
 $('#topAccountButton').addEventListener('click',()=>navigate('account'));
 $('#topDate').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric'}).format(new Date());
-window.addEventListener('hashchange',()=>{const hash=location.hash.replace('#','');navigate(['dashboard','analyzer','odds','live','account'].includes(hash)?hash:'dashboard');});
+window.addEventListener('hashchange',()=>{const hash=location.hash.replace('#','');navigate(['dashboard','insights','analyzer','odds','live','account'].includes(hash)?hash:'dashboard',false);});
 
 const firstView=location.hash.replace('#','');
-if(['dashboard','analyzer','odds','live','account'].includes(firstView))state.view=firstView;
+if(['dashboard','insights','analyzer','odds','live','account'].includes(firstView))state.view=firstView;
 render();
 startAuth();
