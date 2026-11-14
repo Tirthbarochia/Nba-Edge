@@ -16,6 +16,7 @@ class PlayerSearch extends HTMLElement {
     this.form.onsubmit=async e=>{
       e.preventDefault();
       const term=normalize(this.form.elements.search.value);
+      const preset=this.pendingLine; this.pendingLine=null;
       if(!term)return;
       const seq=this.version=(this.version||0)+1;
       this.output.innerHTML='';
@@ -26,23 +27,29 @@ class PlayerSearch extends HTMLElement {
         if(this.version!==seq)return;
         const found=players.filter(p=>normalize(p.name).includes(term));
         const exact=found.filter(p=>normalize(p.name)===term);
-        if(found.length===1||exact.length===1){this.choose(exact[0]||found[0]);return;}
+        if(found.length===1||exact.length===1){this.choose(exact[0]||found[0],preset);return;}
         this.matches.textContent=found.length?'Select a player':'No player found on current NBA rosters.';
         for(const player of found.slice(0,20)){
           const button=document.createElement('button');
           button.className='btn small';button.textContent=player.name+' · '+player.club;
-          button.onclick=()=>this.choose(player);this.matches.append(' ',button);
+          button.onclick=()=>this.choose(player,preset);this.matches.append(' ',button);
         }
       }catch(error){if(seq===this.version)this.matches.textContent=error.message;}
     };
   }
-  choose(player){
-    this.version++;this.player=player;
+  openLine(quote,date){
+    this.pendingLine={date,metric:quote.metric,line:quote.line};
+    this.form.elements.search.value=quote.player;
+    this.form.requestSubmit();
+  }
+  choose(player,preset){
+    this.version=(this.version||0)+1;this.player=player;
     this.matches.textContent='';this.form.elements.search.value=player.name;
     this.output.innerHTML=`<div class="field-row" style="margin-top:16px;flex-wrap:wrap"><label class="field">Game date<input name="day" type="date"></label><label class="field">Stat<select name="metric"><option value="points">Points</option><option value="rebounds">Rebounds</option><option value="assists">Assists</option><option>PRA</option></select></label><label class="field">Your line<input name="line" type="number" min="0" max="250" step="0.5" placeholder="Enter line"></label><label class="field">Window<select name="window">${[5,10,15,20,82].map(n=>'<option value="'+n+'" '+(n===10?'selected':'')+'>'+(n===82?'Season':'Last '+n)+'</option>').join('')}</select></label></div><div data-panel aria-live="polite"></div>`;
     const field=name=>this.output.querySelector('[name="'+name+'"]');
     this.day=field('day');this.metric=field('metric');this.line=field('line');this.window=field('window');this.panel=this.output.querySelector('[data-panel]');
     this.day.value=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    if(preset){this.day.value=preset.date;this.metric.value=preset.metric;this.line.value=preset.line;}
     this.day.onchange=this.metric.onchange=()=>this.load();
     this.line.oninput=this.window.onchange=()=>this.draw();
     this.load();
@@ -65,7 +72,7 @@ class PlayerSearch extends HTMLElement {
     this.panel.innerHTML=`<div class="stat-profile"><div style="flex:1;padding:12px 0"><h3>${escape(d.name)}</h3><strong>${escape(d.club)} · ${d.opponent?'vs '+escape(d.opponent):'No scheduled game'}</strong><small>${escape(d.status||d.date)}</small><b style="font-size:clamp(23px,4vw,36px)">${hasLine&&games.length?Math.round(100*over/games.length)+'% over '+line:avg+' average'} </b><small>${hasLine?over+' of '+games.length+' games above your line':games.length+' games'} · ${escape(d.metric)}</small></div>${d.photo?'<img style="width:clamp(75px,25%,150px);align-self:end" alt="" src="'+escape(d.photo)+'">':''}</div><div style="display:flex;gap:5px;overflow-x:auto;padding:8px 0">${[...games].reverse().map(g=>{
       const outcome=!hasLine?'':g.value>line?'Over':g.value<line?'Under':'Push';
       const color={Over:'#4ade80',Under:'#fb6577',Push:'#c3ccda','':'#a7d8e9'}[outcome];
-      return `<div style="min-width:58px;padding:7px;text-align:center;background:#192b40;border-radius:8px;border-bottom:3px solid ${color}"><small>${escape(g.date.slice(5))}</small><br><b style="color:${color};font-size:20px">${g.value}</b><br><small>${escape(g.opponent)} ${outcome}</small></div>`;
+      return `<div style="min-width:58px;padding:7px;text-align:center;background:#192b40;border-radius:8px;border-bottom:3px solid ${color}"><small>${escape(g.date.slice(5))}</small><br><b style="color:${color};font-size:20px">${g.value}</b><br><small>${escape(g.opponent)} ${outcome}</small>${g.minutes!=null?'<br><small>'+escape(g.minutes)+' min</small>':''}</div>`;
     }).join('')}</div><small>ESPN · Completed regular-season games before ${escape(d.date)}</small>${d.aiAvailable&&hasLine&&games.length?'<p><button class="btn small" data-explain>Explain with AI</button></p><p data-answer aria-live="polite"></p>':''}`;
     const button=this.panel.querySelector('[data-explain]');
     if(button)button.onclick=async()=>{
@@ -79,3 +86,4 @@ class PlayerSearch extends HTMLElement {
   }
 }
 customElements.define('nba-player-search',PlayerSearch);
+

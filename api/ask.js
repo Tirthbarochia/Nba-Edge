@@ -27,6 +27,7 @@ async function card(q) {
   const season=event?.season.year || (Number(date.slice(0,4))+(Number(date.slice(5,7))>=10?1:0));
   const log=await json(common+'/athletes/'+player+'/gamelog?season='+season);
   const cols=names.map(n=>log.names?.indexOf(n)??-1);
+  const minuteIndex=log.names?.indexOf('minutes') ?? -1;
   const games=new Map();
   for(const group of log.seasonTypes||[]) {
     if(!/regular season/i.test(group.displayName))continue;
@@ -35,7 +36,7 @@ async function card(q) {
       if(!game?.gameDate||!['W','L'].includes(game.gameResult))continue;
       const day=eastern(game.gameDate), values=cols.map(i=>row.stats?.[i]);
       if(day>=date||!values.every(v=>/^\d+$/.test(String(v))))continue;
-      games.set(row.eventId,{date:day,opponent:game.opponent.abbreviation,value:values.reduce((s,v)=>s+Number(v),0)});
+      games.set(row.eventId,{date:day,minutes:row.stats?.[minuteIndex] ?? null,opponent:game.opponent.abbreviation,value:values.reduce((s,v)=>s+Number(v),0)});
     }
   }
   return {name:athlete.displayName,club:roster.team.abbreviation,photo:athlete.headshot?.href,date,metric,opponent:opponent?.abbreviation||null,status:event?.status.type.shortDetail||null,games:[...games.values()].sort((a,b)=>b.date.localeCompare(a.date)),aiAvailable:Boolean(process.env.OPENAI_API_KEY)};
@@ -75,3 +76,4 @@ export default async function handler(req,res){
     return res.json({answer});
   } catch{return res.status(502).json({error:'The research feed is temporarily unavailable. Try again.'});}
 }
+
