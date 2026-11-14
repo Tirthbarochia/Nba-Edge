@@ -8,14 +8,39 @@ async function get(params,signal) {
   if (!response.ok) throw new Error('Game data is unavailable. Try Refresh.');
   return response.json();
 }
+function renderTrend(host, rows, opponent, settings) {
+  host.innerHTML='<h3>Game-by-game trend</h3><div class="field-row"><label class="field">Stat<select name="metric">'+['Points','Rebounds','Assists','Points + rebounds + assists'].map((v,i)=>option(i,v)).join('')+'</select></label><label class="field">Games<select name="window">'+[5,10,15,20,'Season','Opponent'].map(v=>option(v,v)).join('')+'</select></label><label class="field">Your prop line<input name="line" type="number" min="0" step="0.5" placeholder="Enter line"></label></div><div data-chart></div>';
+  const metric=host.querySelector('[name=metric]'), period=host.querySelector('[name=window]'), line=host.querySelector('[name=line]');
+  metric.value=settings.metric;period.value=settings.period;line.value=settings.line;
+  function draw(){
+    Object.assign(settings,{metric:metric.value,period:period.value,line:line.value});
+    const subset=period.value==='Opponent'?rows.filter(r=>r.opponentId===opponent.id):period.value==='Season'?rows:rows.slice(0,Number(period.value));
+    const mark=line.value!=='' && line.validity.valid?Number(line.value):null;
+    const vals=subset.map(r=>metric.value==='3'?r.values.reduce((a,b)=>a+b,0):r.values[Number(metric.value)]);
+    const scale=Math.max(1,...vals,mark||0);
+    const over=vals.filter(v=>v>mark).length,under=vals.filter(v=>v<mark).length;
+    const stat=metric.selectedOptions[0].textContent;
+    const pct=n=>Math.round(n*100/vals.length)+'%';
+    const summary=mark===null?'Enter a prop line to see historical hit rates.':'Over '+mark+': '+over+'/'+vals.length+' ('+pct(over)+') · Under: '+under+'/'+vals.length+' ('+pct(under)+') · Push: '+(vals.length-over-under);
+    const bars=subset.map((r,i)=>{
+      const val=vals[i], fill=mark===null?'#91adcf':val>mark?'#b8f34c':val<mark?'#f58e85':'#9caabe';
+      return '<div style="display:grid;grid-template-columns:96px 1fr 30px;gap:10px;align-items:center;margin:5px 0"><small>'+safe(r.date.slice(5)+' '+r.venue+' '+r.opponent)+'</small><div style="height:10px;background:#243144;position:relative;border-radius:3px"><div style="height:100%;width:'+val/scale*100+'%;background:'+fill+';border-radius:3px"></div>'+(mark===null?'':'<i style="position:absolute;top:-2px;bottom:-2px;border-left:1px solid white;left:'+mark/scale*100+'%"></i>')+'</div><b>'+val+'</b></div>';
+    }).join('');
+    host.querySelector('[data-chart]').innerHTML=subset.length?'<p>'+safe(stat)+' · '+safe(summary)+'</p><div style="max-height:320px;overflow:auto">'+bars+'</div>':'<p>No qualifying games in this window.</p>';
+  }
+  host.oninput=draw;draw();
+}
+
 class PlayerStats extends HTMLElement {
   connectedCallback() {
     this.innerHTML = '<section class="card"><div class="card-header"><div><h2>NBA player stats &amp; matchups</h2><div class="card-subtitle">Daily schedule · Eastern time</div></div><button class="btn small" type="button">Refresh</button></div><div class="card-body"><div class="field-row"><label class="field">Game date<input type="date" data-key="date"></label><label class="field">Matchup<select data-key="game"></select></label></div><div class="field-row"><label class="field">Team<select data-key="team"></select></label><label class="field">Player<select data-key="player"></select></label></div><div data-result aria-live="polite"></div></div></section>';
     this.field('date').value = selection.date || dayET();
+    this.chartSettings = {metric:'0',period:'10',line:''};
     this.onchange = e => {
       const key=e.target.dataset.key;
       if(!key) return;
       selection[key]=e.target.value;
+      this.chartSettings.line='';
       this.load(key);
     };
     this.querySelector('button').onclick=()=>this.load('date');
@@ -72,7 +97,8 @@ class PlayerStats extends HTMLElement {
       windows.push(summary('Season to date',rows),summary('vs '+opponent.abbr,vs));
       const gameTable=list=>table(['Date','Opponent','PTS','REB','AST'],list.map(r=>[r.date,r.venue+' '+r.opponent,...r.values]));
       const checked=new Date(log.updated).toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});
-      result.innerHTML='<h3>'+safe(this.field('player').selectedOptions[0].textContent)+' vs '+safe(opponent.name)+'</h3><p class="muted">'+safe(game.status)+' · Regular-season appearances before '+safe(date)+'</p>'+table(['Per-game averages','Games','PTS','REB','AST'],windows)+'<details><summary>Games against '+safe(opponent.abbr)+' ('+vs.length+')</summary>'+(vs.length?gameTable(vs):'<p>No prior meeting played this season.</p>')+'</details><details><summary>Season game log ('+rows.length+')</summary>'+gameTable(rows)+'</details><p class="muted small-text">ESPN game logs · Checked '+safe(checked)+' ET</p>';
+      result.innerHTML='<h3>'+safe(this.field('player').selectedOptions[0].textContent)+' vs '+safe(opponent.name)+'</h3><p class="muted">'+safe(game.status)+' · Regular-season appearances before '+safe(date)+'</p>'+table(['Per-game averages','Games','PTS','REB','AST'],windows)+'<section data-trend></section><details><summary>Games against '+safe(opponent.abbr)+' ('+vs.length+')</summary>'+(vs.length?gameTable(vs):'<p>No prior meeting played this season.</p>')+'</details><details><summary>Season game log ('+rows.length+')</summary>'+gameTable(rows)+'</details><p class="muted small-text">ESPN game logs · Checked '+safe(checked)+' ET</p>';
+      renderTrend(result.querySelector('[data-trend]'),rows,opponent,this.chartSettings);
     } catch(err) {
       if(!controller.signal.aborted) result.textContent='Game data is unavailable. Try Refresh.';
     } finally {if(this.controller===controller)this.busy=false;}
