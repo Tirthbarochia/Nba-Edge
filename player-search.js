@@ -1,3 +1,4 @@
+import {parseSearch,outcome,estimate} from './line-estimate.js';
 import {gameChart} from './game-chart.js';
 const escape = v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const normalize=v=>v.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
@@ -10,14 +11,15 @@ async function request(url,options){
 }
 class PlayerSearch extends HTMLElement {
   connectedCallback(){
-    this.innerHTML=`<section class="card" style="margin-bottom:20px"><div class="card-body"><h2>Find a player</h2><form style="display:flex;gap:8px"><input name="search" class="search" aria-label="Player name" placeholder="Enter a player name" required maxlength="80" style="flex:1;min-width:0"><button class="btn primary">Search</button></form><div data-matches aria-live="polite"></div><div data-card></div></div></section>`;
+    this.innerHTML=`<section class="card" style="margin-bottom:20px"><div class="card-body"><h2>Find a player</h2><form style="display:flex;gap:8px"><input name="search" class="search" aria-label="Player name" placeholder="Player or line, e.g. Kuminga 2+ assists" required maxlength="80" style="flex:1;min-width:0"><button class="btn primary">Search</button></form><div data-matches aria-live="polite"></div><div data-card></div></div></section>`;
     this.form=this.querySelector('form');
     this.matches=this.querySelector('[data-matches]');
     this.output=this.querySelector('[data-card]');
     this.form.onsubmit=async e=>{
       e.preventDefault();
-      const term=normalize(this.form.elements.search.value);
-      const preset=this.pendingLine; this.pendingLine=null;
+      const query=parseSearch(this.form.elements.search.value);
+      const term=normalize(query.name);
+      const preset=this.pendingLine || query.preset; this.pendingLine=null;
       if(!term)return;
       const seq=this.version=(this.version||0)+1;
       this.output.innerHTML='';
@@ -39,20 +41,20 @@ class PlayerSearch extends HTMLElement {
     };
   }
   openLine(quote,date){
-    this.pendingLine={date,metric:quote.metric,line:quote.line};
+    this.pendingLine={date,metric:quote.metric,line:quote.line,side:quote.side};
     this.form.elements.search.value=quote.player;
     this.form.requestSubmit();
   }
   choose(player,preset){
     this.version=(this.version||0)+1;this.player=player;
     this.matches.textContent='';this.form.elements.search.value=player.name;
-    this.output.innerHTML=`<div class="field-row" style="margin-top:16px;flex-wrap:wrap"><label class="field">Game date<input name="day" type="date"></label><label class="field">Stat<select name="metric"><option value="points">Points</option><option value="rebounds">Rebounds</option><option value="assists">Assists</option><option>PRA</option></select></label><label class="field">Your line<input name="line" type="number" min="0" max="250" step="0.5" placeholder="Enter line"></label><label class="field">Window<select name="window">${[5,10,15,20,82].map(n=>'<option value="'+n+'" '+(n===10?'selected':'')+'>'+(n===82?'Season':'Last '+n)+'</option>').join('')}</select></label></div><div data-panel aria-live="polite"></div>`;
+    this.output.innerHTML=`<div class="field-row" style="margin-top:16px;flex-wrap:wrap"><label class="field">Game date<input name="day" type="date"></label><label class="field">Stat<select name="metric"><option value="points">Points</option><option value="rebounds">Rebounds</option><option value="assists">Assists</option><option>PRA</option></select></label><label class="field">Target<select name="side"><option>Over</option><option>Under</option><option>At least</option></select></label><label class="field">Your line<input name="line" type="number" min="0" max="250" step="0.5" placeholder="Enter line"></label><label class="field">Window<select name="window">${[5,10,15,20,82].map(n=>'<option value="'+n+'" '+(n===10?'selected':'')+'>'+(n===82?'Season':'Last '+n)+'</option>').join('')}</select></label></div><div data-panel aria-live="polite"></div>`;
     const field=name=>this.output.querySelector('[name="'+name+'"]');
-    this.day=field('day');this.metric=field('metric');this.line=field('line');this.window=field('window');this.panel=this.output.querySelector('[data-panel]');
+    this.day=field('day');this.metric=field('metric');this.side=field('side');this.line=field('line');this.window=field('window');this.panel=this.output.querySelector('[data-panel]');
     this.day.value=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
-    if(preset){this.day.value=preset.date;this.metric.value=preset.metric;this.line.value=preset.line;}
+    if(preset){if(preset.date)this.day.value=preset.date;this.side.value=preset.side||'Over';this.metric.value=preset.metric;this.line.value=preset.line;}
     this.day.onchange=this.metric.onchange=()=>this.load();
-    this.line.oninput=this.window.onchange=()=>this.draw();
+    this.side.onchange=this.line.oninput=this.window.onchange=()=>this.draw();
     this.load();
   }
   args(){return {player:this.player.id,team:this.player.team,date:this.day.value,metric:this.metric.value};}
@@ -68,15 +70,19 @@ class PlayerSearch extends HTMLElement {
     const d=this.data;if(!d)return;
     const games=this.window.value==='82'?d.games:d.games.slice(0,Number(this.window.value));
     const hasLine=this.line.value!==''&&this.line.validity.valid;
-    const line=Number(this.line.value), over=games.filter(g=>g.value>line).length;
+    const line=Number(this.line.value), side=this.side.value;
+    const hits=games.filter(g=>outcome(g.value,line,side)==='Hit').length;
+    const pushes=games.filter(g=>outcome(g.value,line,side)==='Push').length;
+    const chance=hasLine && d.opponent?estimate(d.games,line,side):null;
+    const target=side==='At least'?line+'+':side.toLowerCase()+' '+line;
     const avg=games.length?(games.reduce((s,g)=>s+g.value,0)/games.length).toFixed(1):'—';
-    this.panel.innerHTML=`<div class="stat-profile"><div style="flex:1;padding:12px 0"><h3>${escape(d.name)}</h3><strong>${escape(d.club)} · ${d.opponent?'vs '+escape(d.opponent):'No scheduled game'}</strong><small>${escape(d.status||d.date)}</small><b style="font-size:clamp(23px,4vw,36px)">${hasLine&&games.length?Math.round(100*over/games.length)+'% over '+line:avg+' average'} </b><small>${hasLine?over+' of '+games.length+' games above your line':games.length+' games'} · ${escape(d.metric)}</small></div>${d.photo?'<img style="width:clamp(75px,25%,150px);align-self:end" alt="" src="'+escape(d.photo)+'">':''}</div>${gameChart(games,hasLine?line:null)}<small>ESPN · Completed regular-season games before ${escape(d.date)}</small>${d.aiAvailable&&hasLine&&games.length?'<p><button class="btn small" data-explain>Explain with AI</button></p><p data-answer aria-live="polite"></p>':''}`;
+    this.panel.innerHTML=`<div class="stat-profile"><div style="flex:1;padding:12px 0"><h3>${escape(d.name)}</h3><strong>${escape(d.club)} · ${d.opponent?'vs '+escape(d.opponent):'No scheduled game'}</strong><small>${escape(d.status||d.date)}</small><b style="font-size:clamp(23px,4vw,36px)">${hasLine?(chance===null?'Estimate unavailable':chance+'% estimated hit chance'):avg+' average'} </b><small>${hasLine?target+' '+escape(d.metric)+' · '+hits+' of '+games.length+' hits'+(pushes?' · '+pushes+' pushes':''):games.length+' games'} · ${escape(d.metric)}</small></div>${d.photo?'<img style="width:clamp(75px,25%,150px);align-self:end" alt="" src="'+escape(d.photo)+'">':''}</div>${hasLine?'<p class="muted small-text">'+(!d.opponent?'Select a scheduled matchup for an estimate.':chance===null?'At least five completed appearances are needed.':'If the player appears. Based on '+d.games.length+' season appearances, weighted toward recent games. The chart window only changes the historical comparison. This estimate is uncalibrated and excludes injury, minutes and opponent adjustments.')+'</p>':''}${gameChart(games,hasLine?line:null,side==='At least')}<small>ESPN · Completed regular-season games before ${escape(d.date)}</small>${d.aiAvailable&&hasLine&&games.length?'<p><button class="btn small" data-explain>Explain with AI</button></p><p data-answer aria-live="polite"></p>':''}`;
     const button=this.panel.querySelector('[data-explain]');
     if(button)button.onclick=async()=>{
       const answer=this.panel.querySelector('[data-answer]');button.disabled=true;answer.textContent='Preparing explanation…';
       try{
         const token=await this.getToken();
-        const data=await request('/api/ask',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({...this.args(),line,window:this.window.value})});
+        const data=await request('/api/ask',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({...this.args(),line,side,window:this.window.value})});
         answer.textContent=data.answer;
       }catch(error){answer.textContent=error.message;}finally{button.disabled=false;}
     };
