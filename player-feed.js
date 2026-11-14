@@ -11,7 +11,7 @@ export async function directory() {
   const teams=(await json(site+'/teams?limit=100')).sports[0].leagues[0].teams;
   const rosters=await Promise.all(teams.map(async ({team})=>{
     const roster=await json(site+'/teams/'+team.id+'/roster');
-    return roster.athletes.map(a=>({id:a.id,name:a.displayName,team:team.id,club:team.abbreviation}));
+    return roster.athletes.map(a=>({id:a.id,name:a.displayName,team:team.id,club:team.abbreviation,flagged:(a.injuries||[]).some(i=>/out|questionable|doubtful|day.to.day|suspend|inactive/i.test(String(i.status?.description||i.status||i.type?.description||"")))}));
   }));
   return rosters.flat();
 }
