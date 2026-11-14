@@ -3,11 +3,10 @@ import {research} from './research.js';
 
 const CONFIG = window.NBA_EDGE_CONFIG || {};
 const HAS_BACKEND = Boolean(CONFIG.SUPABASE_URL && CONFIG.SUPABASE_PUBLISHABLE_KEY);
-const DEMO_KEYS = {predictions:'nba-edge-demo-predictions-v1',entries:'nba-edge-demo-entries-v1'};
 const state = {
-  view:'dashboard',filter:'ALL',query:'',selectedProp:'davion-pra',ticket:[],
+  view:'dashboard',filter:'ALL',query:'',selectedProp:'davion-pra',
   authMode:'signup',client:null,user:null,backendReady:false,loading:false,
-  predictions:[],entries:[],customAnalysis:null,quote:{stake:'',gross:''},
+  customAnalysis:null,
   manualAnalysis:null, marketSource:'kalshi', kalshiSeries:'KXNBAPTS', kalshiDate:todayNY(), kalshiRows:[], kalshiFetched:null, kalshiError:'', kalshiLoading:false, oddsEvents:[], oddsRows:[], oddsFetched:null, oddsError:'', oddsLoading:false, oddsEvent:'', oddsMarket:'player_points', liveTicker:'', liveInfo:null, liveError:'', liveLoading:false
 };
 const $ = sel => document.querySelector(sel);
@@ -24,56 +23,24 @@ const pill = (s,cls='')=>`<span class="pill ${cls}">${esc(s)}</span>`;
 const sampleNotice = () => `<div class="snapshot-banner"><span class="snapshot-icon">!</span><div><strong>ARCHIVED RESEARCH · NOV 13, 2026</strong><br><span>This is a research snapshot, not live NBA data or verified DraftKings Pick6 projections. Check tonight's actual board before entering a paid ticket.</span></div></div>`;
 const userName = () => state.user?.email?.split('@')[0] || 'Guest';
 function toast(msg, type='') {const div=document.createElement('div');div.className=`toast ${type}`;div.textContent=msg;$('#toastArea').append(div);setTimeout(()=>div.remove(),5000);}
-function localRead(key){try{return JSON.parse(localStorage.getItem(key)||'[]')}catch{return []}}
-function localWrite(key,data){try{localStorage.setItem(key,JSON.stringify(data))}catch{toast('Browser storage unavailable. Your changes may not persist.','error')}}
-function uid(){return state.user?.id||null}
 function pageHeader(kicker,title,desc,buttons=''){return `<div class="head-row"><div><div class="eyebrow">${kicker}</div><h1 class="page-title">${title}</h1><p class="page-desc">${desc}</p></div><div class="action-row">${buttons}</div></div>`}
 function kpi(label,value,foot,icon='↗'){return `<div class="kpi"><div class="kpi-top"><span>${label}</span><span class="kpi-icon">${icon}</span></div><div class="kpi-value">${value}</div><div class="kpi-foot">${foot}</div></div>`}
 function playerCell(p){return `<div class="player-cell"><div class="player-avatar">${esc(initials(p.player))}</div><div style="min-width:0"><div class="player-name">${esc(p.player)}</div><div class="player-meta">${esc(p.team||'')}${p.matchup?' · '+esc(p.matchup):''}</div></div></div>`}
 function ratingPill(r){return pill(r,r==='Candidate'?'lime':r==='Pass'?'red':r==='Conditional'?'amber':'')}
 function trend(p){const pct=p.hits/p.n*100;return `<div class="hit-main">${p.hits}/${p.n} <span class="muted small-text">(${percent(p.hits,p.n)})</span></div><div class="hit-progress ${p.hits<7?'warn':''}"><i style="width:${pct}%"></i></div>`}
-function score(){const settled=state.predictions.filter(x=>['win','loss'].includes(x.result));const wins=settled.filter(x=>x.result==='win').length;const pending=state.predictions.filter(x=>x.result==='pending').length;return {settled: settled.length,wins,pending,rate:settled.length?percent(wins,settled.length):'—'}}
-function renderDashboard(){const s=score();const last=state.predictions.slice().sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,4);
-return `<div class="page">${pageHeader('THE COMMAND CENTER','Your edge starts with the data.','A focused workspace for researching NBA props, comparing Pick6 projections and tracking every forecast.',`<button class="btn ghost" data-view="tracking">View tracker</button><button class="btn primary" data-view="builder">+ Build a Pick6 entry</button>`)}<nba-player-stats></nba-player-stats><div class="section-spacer"></div>
-<div class="kpi-grid">${kpi('Saved predictions',nfmt(state.predictions.length),'Personal research log','◈')}${kpi('Settled hit rate',esc(s.rate),`${s.settled} graded predictions`,'◎')}${kpi('Pending forecasts',nfmt(s.pending),'Not counted as wins','◷')}${kpi('Draft entries',nfmt(state.entries.filter(e=>e.status==='draft').length),'Not counted as wagers','▤')}</div>
-<div><div><div class="card"><div class="card-header"><div><h2>Your recent forecasts</h2><div class="card-subtitle">Private to your current account or device</div></div><button class="text-link" data-view="tracking">See all →</button></div>${last.length?last.map(x=>`<div class="research-row">${playerCell(x)}<div class="market-col">${esc(x.side)} ${esc(x.line)} ${esc(x.market)}</div><div>${pill(resultLabel(x.result),x.result==='win'?'lime':x.result==='loss'?'red':'amber')}</div><div></div></div>`).join(''):`<div class="empty"><div class="empty-icon">◷</div><strong>No predictions logged yet</strong><p>Use the Pick6 builder or add a manual forecast to start a transparent track record.</p><button data-view="tracking" class="btn small">Log a forecast</button></div>`}</div></div></div>
-<div class="foot-note">NBA EDGE · Research platform prototype · No official affiliation with the NBA, DraftKings or Kalshi.</div></div>`;
+function renderDashboard(){
+  return `<div class="page">${pageHeader('NBA RESEARCH','Player line research','Explore a matchup, compare recent games, and test your line.', '<button class="btn ghost" data-view="odds">Compare market odds</button>')}<nba-player-stats></nba-player-stats></div>`;
 }
-function renderAnalyzer(){return `<div class="page">${pageHeader('PLAYER PROP INTELLIGENCE','Research before you select.','Inspect historical thresholds and run a descriptive check on any player using actual recent stat totals.',`<button class="btn primary" data-view="builder">Open Pick6 builder →</button>`)}<nba-player-stats></nba-player-stats><div class="section-spacer"></div><details><summary>Archived research and manual stat checker</summary>${sampleNotice()}
+function renderAnalyzer(){return `<div class="page">${pageHeader('PLAYER PROP INTELLIGENCE','Research before you select.','Inspect historical thresholds and run a descriptive check on any player using actual recent stat totals.')}<nba-player-stats></nba-player-stats><div class="section-spacer"></div><details><summary>Archived research and manual stat checker</summary>${sampleNotice()}
 <div class="toolbar"><input id="propSearch" class="search" placeholder="⌕  Search player, team or matchup…" value="${esc(state.query)}" aria-label="Search research props"/><div class="filter-row" id="marketFilters">${['ALL','PTS','REB','AST','PRA','P+R','3PM'].map(f=>`<button data-action="filter" data-filter="${f}" class="filter-pill ${state.filter===f?'active':''}">${f}</button>`).join('')}</div></div>
 <div class="analysis-grid"><div><div class="card"><div class="card-header"><div><h2>Research library</h2><div class="card-subtitle">From your 13-prop research list · not the live Pick6 board</div></div><span class="pill">${research.length} props</span></div><div id="researchList"></div></div><div><div class="card" id="propDetail"></div><div class="section-spacer"></div><div class="card"><div class="card-header"><div><h2>Custom stat checker</h2><div class="card-subtitle">Enter real results, comma-separated</div></div><div class="card-body"><form id="customAnalysisForm"><div class="field"><label for="caPlayer">Player</label><input id="caPlayer" name="player" placeholder="e.g. Jalen Johnson" required maxlength="100"/></div><div class="field-row"><div class="field"><label for="caMarket">Stat category</label><select id="caMarket" name="market">${['PTS','REB','AST','3PM','PRA','P+R','R+A'].map(m=>`<option>${m}</option>`).join('')}</select></div><div class="field"><label for="caLine">Pick6 projection</label><input id="caLine" name="line" type="number" min="0" step="0.5" placeholder="22.5" required/></div></div><div class="field"><label for="caSide">Selection</label><select id="caSide" name="side"><option value="MORE">MORE</option><option value="LESS">LESS</option></select></div><div class="field"><label for="caValues">Recent actual stat totals (oldest to newest)</label><textarea id="caValues" name="values" placeholder="18, 24, 19, 28, 21, 17, 26, 23, 20, 25" required></textarea></div><button class="btn primary" type="submit" style="width:100%">Calculate historical trend</button></form><div id="customAnalysisResult">${renderCustomAnalysisResult()}</div></div></div></div></div></details></div>`}
 function renderResearchList(){const parent=$('#researchList');if(!parent)return;const q=state.query.toLowerCase().trim();const matches=research.filter(p=>(state.filter==='ALL'||p.market===state.filter)&&(`${p.player} ${p.team} ${p.matchup} ${p.market}`.toLowerCase().includes(q)));parent.innerHTML=matches.length?matches.map(sampleRow).join(''):`<div class="empty">No matching research props. Try a different player or stat filter.</div>`}
-function renderPropDetail(){const p=research.find(x=>x.id===state.selectedProp)||research[0];const el=$('#propDetail');if(!el)return;el.innerHTML=`<div class="card-body"><div class="detail-head"><div class="detail-top"><div class="player-avatar" style="height:48px;width:48px;font-size:14px">${esc(initials(p.player))}</div><div><h3>${esc(p.player)}</h3><div class="muted small-text">${esc(p.team)} · ${esc(p.matchup)}</div></div></div>${ratingPill(p.rating)}</div><div class="muted small-text">HISTORICAL CLEAR RATE</div><div class="big-hit">${percent(p.hits,p.n)} <small>${p.hits} / ${p.n} games</small></div><div class="big-meter"><span style="width:${p.hits/p.n*100}%"></span></div><div class="fact-grid"><div class="fact"><small>Researched threshold</small><strong>${esc(p.threshold)}</strong></div><div class="fact"><small>Equivalent MORE line</small><strong>${p.line}</strong></div><div class="fact"><small>Stat category</small><strong>${esc(p.market)}</strong></div><div class="fact"><small>Pick6 availability</small><strong style="color:#e5c87e">Unverified</strong></div></div><div class="note-card"><strong>Key risk:</strong> ${esc(p.risk)}</div><p class="notice">${esc(p.notes)}</p><p class="notice">Historical hits do not establish a calibrated probability, payout advantage, or future result.</p><button class="btn primary" style="width:100%;margin-top:10px" data-action="add-prop" data-id="${esc(p.id)}">+ Add MORE ${p.line} to draft</button></div>`;}
-function renderCustomAnalysisResult(){const r=state.customAnalysis;if(!r)return '';return `<div class="result-panel"><strong>${esc(r.player)} · ${esc(r.side)} ${r.line} ${esc(r.market)}</strong><div style="display:flex;gap:17px;flex-wrap:wrap;margin-top:13px"><div><div class="big-hit" style="font-size:29px">${r.hits}/${r.n}</div><span class="muted small-text">Historical clears</span></div><div><div class="big-hit" style="font-size:29px">${nfmt(r.avg,1)}</div><span class="muted small-text">Observed average</span></div><div><div class="big-hit" style="font-size:29px">${nfmt(r.median,1)}</div><span class="muted small-text">Median</span></div></div><p>These are descriptive sample statistics only. Results are not automatically an estimated probability or a recommendation.</p><button class="btn small" style="margin-top:11px" data-action="add-custom">+ Add to builder</button></div>`}
+function renderPropDetail(){const p=research.find(x=>x.id===state.selectedProp)||research[0];const el=$('#propDetail');if(!el)return;el.innerHTML=`<div class="card-body"><div class="detail-head"><div class="detail-top"><div class="player-avatar" style="height:48px;width:48px;font-size:14px">${esc(initials(p.player))}</div><div><h3>${esc(p.player)}</h3><div class="muted small-text">${esc(p.team)} · ${esc(p.matchup)}</div></div></div>${ratingPill(p.rating)}</div><div class="muted small-text">HISTORICAL CLEAR RATE</div><div class="big-hit">${percent(p.hits,p.n)} <small>${p.hits} / ${p.n} games</small></div><div class="big-meter"><span style="width:${p.hits/p.n*100}%"></span></div><div class="fact-grid"><div class="fact"><small>Researched threshold</small><strong>${esc(p.threshold)}</strong></div><div class="fact"><small>Equivalent MORE line</small><strong>${p.line}</strong></div><div class="fact"><small>Stat category</small><strong>${esc(p.market)}</strong></div><div class="fact"><small>Pick6 availability</small><strong style="color:#e5c87e">Unverified</strong></div></div><div class="note-card"><strong>Key risk:</strong> ${esc(p.risk)}</div><p class="notice">${esc(p.notes)}</p><p class="notice">Historical hits do not establish a calibrated probability, payout advantage, or future result.</p></div>`;}
+function renderCustomAnalysisResult(){const r=state.customAnalysis;if(!r)return '';return `<div class="result-panel"><strong>${esc(r.player)} · ${esc(r.side)} ${r.line} ${esc(r.market)}</strong><div style="display:flex;gap:17px;flex-wrap:wrap;margin-top:13px"><div><div class="big-hit" style="font-size:29px">${r.hits}/${r.n}</div><span class="muted small-text">Historical clears</span></div><div><div class="big-hit" style="font-size:29px">${nfmt(r.avg,1)}</div><span class="muted small-text">Observed average</span></div><div><div class="big-hit" style="font-size:29px">${nfmt(r.median,1)}</div><span class="muted small-text">Median</span></div></div><p>These are descriptive sample statistics only. Results are not automatically an estimated probability or a recommendation.</p></div>`}
 
-function addTicketLeg(leg) {
-  if(state.ticket.length>=6){toast('Maximum six selections in this builder.','error');return;}
-  const key = `${leg.player}|${leg.market}`;
-  if(state.ticket.some(x=>`${x.player}|${x.market}`===key)){toast('One selection per player/stat market; remove the existing one first.','error');return;}
-  state.ticket.push({id:id(),player:String(leg.player).slice(0,100),team:leg.team||'',matchup:leg.matchup||'',market:leg.market,side:leg.side,line:Number(leg.line),source:leg.source||'manual',verified:false});
-  toast('Added to your draft. Confirm the current Pick6 projection.','success');render();
-}
-function renderBuilder(){const names=research.slice(0,12);const warnings=[];
-  if(state.ticket.length>0&&state.ticket.length<2)warnings.push('Pick6 entries need multiple selections. Save this as a draft until you have enough legs.');
-  if(state.ticket.length>1&&new Set(state.ticket.map(x=>x.team||x.player)).size===1)warnings.push('Every player is from one team. Pick6 commonly requires players from multiple teams; verify current rules.');
-  if(state.ticket.some(x=>x.source!=='live'))warnings.push('Every line on this ticket is manually entered or from archived research—not verified on the current Pick6 board.');
-  const dupPlayers=state.ticket.map(x=>x.player).filter((v,i,a)=>a.indexOf(v)!==i);if(dupPlayers.length)warnings.push('Same-player picks have correlated outcomes: '+[...new Set(dupPlayers)].map(esc).join(', '));
-  const matchupCounts={};state.ticket.forEach(x=>{if(x.matchup)matchupCounts[x.matchup]=(matchupCounts[x.matchup]||0)+1});if(Object.values(matchupCounts).some(x=>x>1))warnings.push('Some legs share a game. Consider matchup/tempo/injury correlation rather than multiplying independent hit rates.');
-  return `<div class="page">${pageHeader('PICK6 ENTRY WORKSPACE','Build deliberately. Not bigger.','Select a line, check its research, then save a draft. This does not place a wager.',`<button class="btn ghost" data-action="clear-ticket">Clear builder</button>`)}${sampleNotice()}
-  <div class="ticket-grid"><div><div class="card"><div class="card-header"><div><h2>Research candidates</h2><div class="card-subtitle">Select MORE or LESS · lines must be checked manually</div></div>${pill('13 RESEARCH PROPS','amber')}</div><div class="choice-grid">${names.map(p=>`<div class="choice"><strong>${esc(p.player)}</strong><small>${esc(p.team)} · ${esc(p.matchup)}</small><div class="choice-market">${esc(p.market)} ${p.line}</div><small>Threshold: ${esc(p.threshold)} · ${p.hits}/${p.n} historical MORE hits</small><div class="choice-buttons"><button class="btn small primary" data-action="pick-side" data-id="${esc(p.id)}" data-side="MORE">MORE</button><button class="btn small ghost" data-action="pick-side" data-id="${esc(p.id)}" data-side="LESS">LESS</button></div></div>`).join('')}</div></div><div class="section-spacer"></div><div class="card"><div class="card-header"><div><h2>Add any Pick6 projection</h2><div class="card-subtitle">Copy the current line from the Pick6 app</div></div></div><div class="card-body"><form id="manualLegForm"><div class="field-row"><div class="field"><label>Player</label><input name="player" maxlength="100" placeholder="Player name" required/></div><div class="field"><label>Team</label><input name="team" maxlength="12" placeholder="e.g. BOS"/></div></div><div class="field-row"><div class="field"><label>Market</label><select name="market">${['PTS','REB','AST','3PM','PRA','P+R','R+A','STL','BLK'].map(x=>`<option>${x}</option>`).join('')}</select></div><div class="field"><label>Projection</label><input name="line" type="number" min="0" step="0.5" placeholder="22.5" required/></div></div><div class="field"><label>Side</label><select name="side"><option>MORE</option><option>LESS</option></select></div><button type="submit" class="btn primary">+ Add manually</button></form></div></div></div>
-  <div><div class="card"><div class="card-header"><div><h2>My draft ticket</h2><div class="card-subtitle">${state.ticket.length} / 6 selections</div></div>${pill('NOT PLACED','amber')}</div><div class="card-body">${state.ticket.length?state.ticket.map(x=>`<div class="ticket-leg"><div><strong>${esc(x.player)} · ${esc(x.side)} ${x.line} ${esc(x.market)}</strong><small>${esc(x.team||'Team not set')} · Unverified line</small></div><button class="remove-btn" data-action="remove-leg" data-id="${esc(x.id)}" aria-label="Remove ${esc(x.player)}">×</button></div>`).join(''):'<div class="empty"><div class="empty-icon">▤</div><strong>Your entry is empty</strong><p>Add two or more player props to begin.</p></div>'}
-  ${warnings.length?`<ul class="warning-list">${warnings.map(x=>`<li>⚠ ${x}</li>`).join('')}</ul>`:''}
-  <div class="divider"></div><form id="quoteForm"><div class="muted small-text" style="margin-bottom:10px">OPTIONAL QUOTE CHECK (ENTER ACTUAL PICK6 AMOUNTS)</div><div class="field-row"><div class="field"><label>Entry cost ($)</label><input type="number" min="0" step="0.01" name="stake" value="${esc(state.quote.stake)}" placeholder="10"/></div><div class="field"><label>Gross return if correct ($)</label><input type="number" min="0" step="0.01" name="gross" value="${esc(state.quote.gross)}" placeholder="35"/></div></div><button type="submit" class="btn ghost small" style="width:100%">Check payout math</button></form>${quoteResult()}
-  <div class="divider"></div><button class="btn primary" style="width:100%" data-action="save-entry" ${state.ticket.length?'':'disabled'}>Save draft entry</button><button class="btn ghost" style="width:100%;margin-top:10px" data-action="track-ticket" ${state.ticket.length?'':'disabled'}>Log legs as pending forecasts</button><p class="notice">Saving a draft or logging a forecast does not mean a wager was placed. We do not submit bets.</p></div></div>
-  <div class="section-spacer"></div><div class="card"><div class="card-header"><div><h2>Saved entries</h2><div class="card-subtitle">Your personal drafts and research records</div></div></div>${state.entries.length?state.entries.slice().reverse().slice(0,6).map(x=>`<div class="ticket-leg" style="padding:14px 18px"><div><strong>${(x.legs||[]).length} legs · ${esc(x.status||'draft').toUpperCase()}</strong><small>${esc((x.created_at||'').slice(0,10))} · ${(x.legs||[]).map(v=>esc(v.player)).join(', ')}</small></div><button data-action="delete-entry" data-id="${esc(x.id)}" class="btn small ghost">Delete</button></div>`).join(''):'<div class="empty">No saved entries yet.</div>'}</div></div></div></div>`;
-}
-function quoteResult(){const stake=Number(state.quote.stake),gross=Number(state.quote.gross);if(!(stake>0)||!(gross>0))return '<p class="notice">No price quote entered yet. Historical hit rates are not calibrated win probabilities.</p>';if(gross<=stake)return '<p class="notice" style="color:#f1b59a">Gross return must be greater than entry cost to show positive profit.</p>';const be=100*stake/gross;return `<div class="result-panel"><div class="price-metric">Potential net profit <strong>${money(gross-stake)}</strong></div><div class="price-metric">Break-even combined hit rate <strong>${be.toFixed(1)}%</strong></div><p>Arithmetic only, ignoring fees, promotions and payout adjustments. Not an estimated success probability.</p></div>`}
-function renderTracking(){const s=score();return `<div class="page">${pageHeader('PERFORMANCE LAB','Track every call.','Log picks before games, then grade hits, misses and pushes separately. These are your own records.',`<button class="btn ghost" data-action="export-csv">Export CSV ↓</button>`)}<div class="kpi-grid">${kpi('Total forecasts',state.predictions.length,'Including pending','▤')}${kpi('Settled',s.settled,'HIT or MISS only','◎')}${kpi('Historical hit rate',s.rate,'No adjustment for odds','↗')}${kpi('Pending',s.pending,'Not counted as wins','◷')}</div>
-<div class="card"><div class="card-header"><div><h2>Log a forecast</h2><div class="card-subtitle">Save before the game starts to preserve prediction integrity</div></div></div><div class="card-body"><form id="forecastForm"><div class="field-row"><div class="field"><label>Player</label><input name="player" required maxlength="100" placeholder="Player name" /></div><div class="field"><label>Team</label><input name="team" maxlength="12" placeholder="e.g. NYK" /></div></div><div class="field-row"><div class="field"><label>Market</label><select name="market">${['PTS','REB','AST','3PM','PRA','P+R','R+A','STL','BLK'].map(x=>`<option>${x}</option>`).join('')}</select></div><div class="field"><label>Projection</label><input name="line" type="number" min="0" step="0.5" required placeholder="20.5"/></div></div><div class="field-row"><div class="field"><label>Side</label><select name="side"><option>MORE</option><option>LESS</option></select></div><div class="field"><label>Game date</label><input type="date" name="game_date" value="${today()}" required/></div></div><div class="field"><label>Notes / reason</label><textarea name="note" maxlength="500" placeholder="Minutes, matchup, injuries, line source and why you selected it"></textarea></div><button class="btn primary" type="submit">Save pending forecast</button></form></div></div>
-<div class="section-spacer"></div><div class="card"><div class="card-header"><div><h2>Prediction history</h2><div class="card-subtitle">All statuses and changes are personal to your account</div></div><div class="tracker-table"><table><thead><tr><th>Date</th><th>Player</th><th>Selection</th><th>Status</th><th>Grade / actions</th></tr></thead><tbody>${state.predictions.length?state.predictions.slice().sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).map(x=>`<tr><td>${esc(x.game_date||'—')}</td><td><strong>${esc(x.player)}</strong><br><span class="muted">${esc(x.team||'')}</span></td><td>${esc(x.side)} ${esc(x.line)} ${esc(x.market)}</td><td><span class="status-chip ${esc(x.result)}">${resultLabel(x.result)}</span></td><td><div class="inline-actions"><select class="mini-select" data-change="grade" data-id="${esc(x.id)}" aria-label="Grade forecast">${['pending','win','loss','push','void'].map(v=>`<option value="${v}" ${x.result===v?'selected':''}>${resultLabel(v)}</option>`).join('')}</select><button class="btn small ghost" data-action="delete-forecast" data-id="${esc(x.id)}">Delete</button></div></td></tr>`).join(''):'<tr><td colspan="5"><div class="empty"><strong>No forecasts yet</strong><p>Add your first prediction before tonight’s game.</p></div></td></tr>'}</tbody></table></div></div><div class="foot-note">To audit a model properly, keep all forecasts, including misses, and note any grading corrections. This tracker is not a verified third-party record.</div></div>`}
-function renderAccount(){return `<div class="page">${pageHeader('ACCOUNT & ACCESS',state.user?'Your NBA Edge account.':'Join NBA Edge.','Create a free research account to save your predictions across devices.')}<div class="auth-layout"><div class="card"><div class="card-header"><div><h2>${state.user?'Connected account':HAS_BACKEND?'Sign in or create an account':'Demo mode is available'}</h2><div class="card-subtitle">${HAS_BACKEND?'Supabase Auth · Email and password':'Configure Supabase to activate public registration'}</div></div></div><div class="card-body">${state.user?`<p>Signed in as <strong>${esc(state.user.email)}</strong></p><p class="notice">Your forecasts are kept private using per-user database access policies.</p><button class="btn ghost" data-action="logout" style="margin-top:16px">Sign out</button>`:HAS_BACKEND?`<div class="auth-switch"><button class="${state.authMode==='signup'?'active':''}" data-action="switch-auth" data-mode="signup">Create account</button><button class="${state.authMode==='signin'?'active':''}" data-action="switch-auth" data-mode="signin">Sign in</button></div><form id="authForm"><div class="field"><label>Email address</label><input name="email" type="email" autocomplete="email" required/></div><div class="field"><label>Password (8+ characters)</label><input name="password" type="password" minlength="8" autocomplete="${state.authMode==='signup'?'new-password':'current-password'}" required/></div><button class="btn primary" style="width:100%" type="submit">${state.authMode==='signup'?'Create account':'Sign in'}</button></form><p class="notice">If email confirmation is enabled, follow the verification link from Supabase before signing in.</p>`:`<div class="empty"><div class="empty-icon">♙</div><strong>Public registration needs a database</strong><p>Try the rest of the site now. For shared accounts, create a Supabase project, run the included SQL schema, and add the publishable configuration to config.js.</p></div>`}</div></div>
-<div class="card"><div class="card-header"><div><h2>What your account includes</h2></div></div><div class="card-body"><div class="account-benefit"><strong>Personal prop library</strong><p>Research statistics and manually check the actual Pick6 projection before choosing a side.</p></div><div class="account-benefit"><strong>Draft builder</strong><p>Save candidate tickets without claiming a wager was placed.</p></div><div class="account-benefit"><strong>Private prediction history</strong><p>Track misses, wins, pushes and voids with correct hit-rate denominators.</p></div><div class="account-benefit"><strong>Data integrity first</strong><p>Unverified lines are flagged, and backtested historical frequencies are not presented as live forecasts.</p></div></div></div></div></div>`}
-function render(){const views={dashboard:renderDashboard,analyzer:renderAnalyzer,odds:renderOdds,builder:renderBuilder,tracking:renderTracking,account:renderAccount,live:renderLive};$('#mainContent').innerHTML=(views[state.view]||renderDashboard)();document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===state.view));$('#navCount').textContent=state.ticket.length;$('#topCrumb').textContent=({dashboard:'OVERVIEW',analyzer:'PROP ANALYZER',odds:'MARKET SCANNER',live:'LIVE GAME DATA',builder:'PICK6 BUILDER',tracking:'TRACKER',account:'MY ACCOUNT'}[state.view]||'OVERVIEW');$('#topAccountButton').textContent=state.user?userName():'Guest demo';$('#topAvatar').textContent=state.user?initials(userName()):'G';$('#connectionName').textContent=state.user?'Account connected':HAS_BACKEND?'Registration enabled':'Research demo';$('#connectionSub').textContent=state.user?'Private data syncing':HAS_BACKEND?'Sign in to save across devices':'Kalshi public market data';if(state.view==='analyzer'){renderResearchList();renderPropDetail()}}
+function renderAccount(){return `<div class="page">${pageHeader('ACCOUNT & ACCESS',state.user?'Your NBA Edge account.':'Join NBA Edge.','Sign in to compare live sportsbook lines.')}<div class="auth-layout"><div class="card"><div class="card-header"><div><h2>${state.user?'Connected account':HAS_BACKEND?'Sign in or create an account':'Demo mode is available'}</h2><div class="card-subtitle">${HAS_BACKEND?'Supabase Auth · Email and password':'Configure Supabase to activate public registration'}</div></div></div><div class="card-body">${state.user?`<p>Signed in as <strong>${esc(state.user.email)}</strong></p><button class="btn ghost" data-action="logout" style="margin-top:16px">Sign out</button>`:HAS_BACKEND?`<div class="auth-switch"><button class="${state.authMode==='signup'?'active':''}" data-action="switch-auth" data-mode="signup">Create account</button><button class="${state.authMode==='signin'?'active':''}" data-action="switch-auth" data-mode="signin">Sign in</button></div><form id="authForm"><div class="field"><label>Email address</label><input name="email" type="email" autocomplete="email" required/></div><div class="field"><label>Password (8+ characters)</label><input name="password" type="password" minlength="8" autocomplete="${state.authMode==='signup'?'new-password':'current-password'}" required/></div><button class="btn primary" style="width:100%" type="submit">${state.authMode==='signup'?'Create account':'Sign in'}</button></form><p class="notice">If email confirmation is enabled, follow the verification link from Supabase before signing in.</p>`:`<div class="empty"><div class="empty-icon">♙</div><strong>Public registration needs a database</strong><p>Try the rest of the site now. For shared accounts, create a Supabase project, run the included SQL schema, and add the publishable configuration to config.js.</p></div>`}</div></div>
+</div></div>`}
+function render(){const views={dashboard:renderDashboard,analyzer:renderAnalyzer,odds:renderOdds,account:renderAccount,live:renderLive};$('#mainContent').innerHTML=(views[state.view]||renderDashboard)();document.querySelectorAll('[data-view]').forEach(el=>el.classList.toggle('active',el.dataset.view===state.view));$('#topCrumb').textContent=({dashboard:'OVERVIEW',analyzer:'PROP ANALYZER',odds:'MARKET SCANNER',live:'LIVE GAME DATA',account:'MY ACCOUNT'}[state.view]||'OVERVIEW');$('#topAccountButton').textContent=state.user?userName():'Guest';$('#topAvatar').textContent=state.user?initials(userName()):'G';$('#connectionName').textContent=state.user?'Account connected':HAS_BACKEND?'Registration enabled':'Research demo';$('#connectionSub').textContent=state.user?'Sportsbook scanner available':HAS_BACKEND?'Sign in for sportsbook odds':'Kalshi public market data';if(state.view==='analyzer'){renderResearchList();renderPropDetail()}}
 function navigate(view){state.view=view;$('#sidebar').classList.remove('open');render();window.scrollTo({top:0,behavior:'auto'});}
 
 // LIVE MARKET DATA -----------------------------------------------------------
@@ -163,51 +130,11 @@ async function loadLiveGame(ticker) {
 }
 
 // PREDICTION AND ACCOUNT STORAGE --------------------------------------------
-function persistDemo(){localWrite(DEMO_KEYS.predictions,state.predictions);localWrite(DEMO_KEYS.entries,state.entries);}
-function loadDemo(){state.predictions=localRead(DEMO_KEYS.predictions);state.entries=localRead(DEMO_KEYS.entries);}
 async function authToken(){
   if(!state.client || !state.user)throw new Error('Sign in to access this market source.');
   const {data,error}=await state.client.auth.getSession();
   if(error || !data?.session?.access_token)throw new Error('Your session has expired. Please sign in.');
   return data.session.access_token;
-}
-async function loadAccountRecords() {
-  if (!state.client || !state.user) {loadDemo();render();return;}
-  const [preds,entries]=await Promise.all([
-    state.client.from('predictions').select('*').order('created_at',{ascending:false}).limit(500),
-    state.client.from('entries').select('*').order('created_at',{ascending:false}).limit(200)
-  ]);
-  if(preds.error||entries.error){toast('Account connected, but tables could not load. Run the supplied schema in Supabase.','error');return;}
-  state.predictions=preds.data||[];state.entries=entries.data||[];render();
-}
-async function saveForecast(p) {
-  const payload={id:id(),user_id:uid(),player:String(p.player||'').trim().slice(0,100),team:String(p.team||'').slice(0,12),market:p.market,side:p.side,line:Number(p.line),game_date:p.game_date||todayNY(),note:String(p.note||'').slice(0,500),result:'pending',created_at:new Date().toISOString()};
-  if(!payload.player||!Number.isFinite(payload.line)||payload.line<0||!['MORE','LESS'].includes(payload.side))throw new Error('Check the player, line and side.');
-  if(state.user){
-    const {data,error}=await state.client.from('predictions').insert(payload).select().single();
-    if(error)throw new Error(error.message);
-    state.predictions.unshift(data);
-  }else{delete payload.user_id;state.predictions.unshift(payload);persistDemo();}
-}
-async function removeForecast(recordId){
-  if(state.user){const {error}=await state.client.from('predictions').delete().eq('id',recordId);if(error)throw new Error(error.message);}
-  state.predictions=state.predictions.filter(p=>p.id!==recordId);if(!state.user)persistDemo();render();
-}
-async function gradeForecast(recordId,result){
-  if(!['pending','win','loss','push','void'].includes(result))return;
-  if(state.user){const {error}=await state.client.from('predictions').update({result}).eq('id',recordId);if(error)throw new Error(error.message);}
-  state.predictions=state.predictions.map(p=>p.id===recordId?{...p,result}:p);if(!state.user)persistDemo();render();
-}
-async function saveEntry(){
-  if(!state.ticket.length){toast('Add a selection before saving.','error');return;}
-  const payload={id:id(),user_id:uid(),legs:state.ticket.map(x=>({...x})),status:'draft',created_at:new Date().toISOString()};
-  if(state.user){const {data,error}=await state.client.from('entries').insert(payload).select().single();if(error)throw new Error(error.message);state.entries.unshift(data);}
-  else {delete payload.user_id;state.entries.unshift(payload);persistDemo();}
-  toast('Draft entry saved. This is not a placed bet.','success');render();
-}
-async function deleteEntry(entryId){
-  if(state.user){const {error}=await state.client.from('entries').delete().eq('id',entryId);if(error)throw new Error(error.message);}
-  state.entries=state.entries.filter(e=>e.id!==entryId);if(!state.user)persistDemo();render();
 }
 async function submitAuth(form) {
   if(!state.client){toast('Public registration requires a configured Supabase project.','error');return;}
@@ -218,13 +145,6 @@ async function submitAuth(form) {
   if(data?.user&&!data.session)toast('Account created. Check your email for a confirmation link.','success');
   else toast(state.authMode==='signup'?'Account created and signed in.':'Signed in.','success');
 }
-function exportPredictionsCSV(){
-  const columns=['game_date','player','team','market','side','line','result','note','created_at'];
-  const safeCell=v=>{let s=String(v??'');if(/^[=+@\-\t\r]/.test(s))s="'"+s;return '"'+s.replace(/"/g,'""')+'"'};
-  const csv=[columns.join(','),...state.predictions.map(p=>columns.map(c=>safeCell(p[c])).join(','))].join('\r\n');
-  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');a.href=url;a.download='nba-edge-prediction-history.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
-}
 async function startAuth(){
   if(!HAS_BACKEND)return;
   try{
@@ -233,15 +153,15 @@ async function startAuth(){
     const {data,error}=await state.client.auth.getUser();
     if(!error) state.user=data.user||null;
     state.backendReady=true;
-    if(state.user)await loadAccountRecords();else render();
+    render();
     state.client.auth.onAuthStateChange((event,session)=>{
       if(event==='INITIAL_SESSION')return;
       const before=state.user?.id||null;state.user=session?.user||null;
       if((state.user?.id||null)!==before){
-        if(state.user)loadAccountRecords();else{loadDemo();render();}
+        render();
       }
     });
-  } catch {toast('Account service unavailable. You can still try the local demo.','error');}
+  } catch {toast('Account service unavailable. You can still use public player research.','error');}
 }
 
 // EVENT DELEGATION -----------------------------------------------------------
@@ -253,26 +173,8 @@ document.addEventListener('click',async e=>{
   try {
     if(action==='filter'){state.filter=btn.dataset.filter;render();return;}
     if(action==='open-prop'){state.selectedProp=btn.dataset.id;renderPropDetail();return;}
-    if(action==='add-prop'||action==='pick-side'){
-      const prop=research.find(p=>p.id===btn.dataset.id);if(!prop)return;
-      addTicketLeg({player:prop.player,team:prop.team,matchup:prop.matchup,market:prop.market,side:btn.dataset.side||'MORE',line:prop.line,source:'archived-research'});return;
-    }
-    if(action==='add-custom'){
-      const r=state.customAnalysis;if(!r)return;
-      addTicketLeg({player:r.player,market:r.market,side:r.side,line:r.line,source:'manual-stat-log'});return;
-    }
-    if(action==='remove-leg'){state.ticket=state.ticket.filter(x=>x.id!==btn.dataset.id);render();return;}
-    if(action==='clear-ticket'){state.ticket=[];state.quote={stake:'',gross:''};render();return;}
-    if(action==='save-entry'){await saveEntry();return;}
-    if(action==='track-ticket'){
-      for(const leg of state.ticket)await saveForecast({...leg,game_date:todayNY(),note:`Draft research leg; ${leg.source}; Pick6 line not independently verified.`});
-      toast(`${state.ticket.length} pending forecasts saved.`, 'success');navigate('tracking');return;
-    }
-    if(action==='delete-forecast'){if(confirm('Delete this prediction record?'))await removeForecast(btn.dataset.id);return;}
-    if(action==='delete-entry'){if(confirm('Delete this saved draft?'))await deleteEntry(btn.dataset.id);return;}
-    if(action==='export-csv'){exportPredictionsCSV();return;}
     if(action==='switch-auth'){state.authMode=btn.dataset.mode;render();return;}
-    if(action==='logout'){if(state.client)await state.client.auth.signOut();state.user=null;loadDemo();render();return;}
+    if(action==='logout'){if(state.client)await state.client.auth.signOut();state.user=null;render();return;}
     if(action==='market-source'){state.marketSource=btn.dataset.source;render();return;}
     if(action==='odds-events'){await oddsEvents();return;}
     if(action==='track-event'){await loadLiveGame(btn.dataset.event);return;}
@@ -280,12 +182,6 @@ document.addEventListener('click',async e=>{
 });
 document.addEventListener('input',e=>{
   if(e.target.id==='propSearch'){state.query=e.target.value;renderResearchList();}
-});
-document.addEventListener('change',async e=>{
-  if(e.target.dataset.change==='grade'){
-    const id=e.target.dataset.id;
-    try{await gradeForecast(id,e.target.value);}catch(err){toast(err.message,'error');render();}
-  }
 });
 document.addEventListener('submit',async e=>{
   const form=e.target;if(!form.id)return;e.preventDefault();
@@ -300,17 +196,6 @@ document.addEventListener('submit',async e=>{
       state.customAnalysis={player:String(data.get('player')||'').trim(),market:String(data.get('market')),side,line,hits:vals.filter(v=>side==='MORE'?v>line:v<line).length,n:vals.length,avg:vals.reduce((a,b)=>a+b,0)/vals.length,median};
       $('#customAnalysisResult').innerHTML=renderCustomAnalysisResult();return;
     }
-    if(form.id==='manualLegForm'){
-      const line=Number(data.get('line'));if(!Number.isFinite(line)||line<0)throw new Error('Enter a valid nonnegative projection.');
-      addTicketLeg({player:String(data.get('player')||'').trim(),team:String(data.get('team')||'').trim().toUpperCase(),market:String(data.get('market')),side:String(data.get('side')),line,source:'user-entered Pick6 projection'});return;
-    }
-    if(form.id==='quoteForm'){
-      state.quote={stake:String(data.get('stake')||''),gross:String(data.get('gross')||'')};render();return;
-    }
-    if(form.id==='forecastForm'){
-      await saveForecast({player:String(data.get('player')||'').trim(),team:String(data.get('team')||'').trim().toUpperCase(),market:String(data.get('market')),side:String(data.get('side')),line:Number(data.get('line')),game_date:String(data.get('game_date')),note:String(data.get('note')||'')});
-      toast('Pending forecast saved.','success');render();return;
-    }
     if(form.id==='authForm'){await submitAuth(form);return;}
     if(form.id==='kalshiForm'){await kalshiMarkets(form);return;}
     if(form.id==='oddsForm'){await oddsProps(form);return;}
@@ -320,9 +205,9 @@ document.addEventListener('submit',async e=>{
 $('#mobileMenu').addEventListener('click',()=>$('#sidebar').classList.toggle('open'));
 $('#topAccountButton').addEventListener('click',()=>navigate('account'));
 $('#topDate').textContent=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',month:'short',day:'numeric',year:'numeric'}).format(new Date());
-window.addEventListener('hashchange',()=>{const hash=location.hash.replace('#','');if(['dashboard','analyzer','odds','live','builder','tracking','account'].includes(hash))navigate(hash);});
-loadDemo();
+window.addEventListener('hashchange',()=>{const hash=location.hash.replace('#','');navigate(['dashboard','analyzer','odds','live','account'].includes(hash)?hash:'dashboard');});
+
 const firstView=location.hash.replace('#','');
-if(['dashboard','analyzer','odds','live','builder','tracking','account'].includes(firstView))state.view=firstView;
+if(['dashboard','analyzer','odds','live','account'].includes(firstView))state.view=firstView;
 render();
 startAuth();
