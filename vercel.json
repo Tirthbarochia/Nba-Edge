@@ -24,5 +24,13 @@
       "path": "/api/insights",
       "schedule": "0 16 * * *"
     }
-  ]
+  ],
+  "functions": {
+    "api/insights.js": {
+      "maxDuration": 60
+    },
+    "api/lines.js": {
+      "maxDuration": 60
+    }
+  }
 }

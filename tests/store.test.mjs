@@ -1,0 +1,190 @@
+// Saved-snapshot behavior: visitors never trigger provider calls beyond the daily budget,
+// and suggested insights stay listed after later updates. All network access is mocked.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import insightsHandler from '../api/insights.js';
+import linesHandler from '../api/lines.js';
+import oddsHandler from '../api/odds.js';
+
+const NOON = Date.parse('2026-11-15T18:00:00Z');          // 1:00 PM Eastern
+const TIP = '2026-11-16T00:00:00Z';                        // 7:00 PM Eastern, same Eastern day
+const EVENT = 'evt0000000001';
+const defaults = {odds_days:{version:0,refreshes:0,last_started:null,fetched_at:null,games:0,covered:0,credits_spent:0,scanner_credits:0,credits_remaining:null,credits_used:null,usage_at:null,note:null,insights_started:null,insights_at:null}};
+const keys = {odds_days:['slate_date'],odds_events:['slate_date','event_id'],insight_picks:['slate_date','pick_key']};
+
+function makeRes(){return {statusCode:200,headers:{},body:null,
+  setHeader(name,value){this.headers[name]=value;return this},
+  status(code){this.statusCode=code;return this},
+  json(data){this.body=data;return this},end(){return this}};}
+const reply = (body,headers={}) => ({ok:true,status:200,headers:{get:name=>headers[name]??null},json:async()=>body,text:async()=>JSON.stringify(body)});
+
+// A small in-memory stand-in for the Supabase REST API, covering the filters the site uses.
+function fakeWorld() {
+  const world = {tables:{odds_days:[],odds_events:[],insight_picks:[]}, calls:{events:0,quotes:0,scanner:0,store:0}, books:null, remaining:480};
+  const matches = (row,query) => Object.entries(query).every(([column,filter]) => {
+    if (['select','order','limit','on_conflict'].includes(column)) return true;
+    if (filter === 'is.null') return row[column] == null;
+    if (filter === 'not.is.null') return row[column] != null;
+    if (filter === 'is.true') return row[column] === true;
+    if (filter.startsWith('eq.')) return String(row[column]) === filter.slice(3);
+    throw Error('Unsupported filter ' + filter);
+  });
+  const store = (url,options) => {
+    world.calls.store++;
+    assert.equal(options.headers['x-nba-edge-server'],'test-token');
+    const table = url.pathname.split('/').pop(), rows = world.tables[table];
+    const query = Object.fromEntries(url.searchParams), prefer = options.headers.prefer || '';
+    const body = options.body ? JSON.parse(options.body) : null;
+    if (options.method === 'GET') {
+      let found = rows.filter(r => matches(r,query));
+      if (query.order) { const [column,direction] = query.order.split('.'); found = [...found].sort((a,b)=>String(a[column]).localeCompare(String(b[column]))*(direction==='desc'?-1:1)); }
+      return reply(found.slice(0, query.limit ? Number(query.limit) : undefined).map(r => structuredClone(r)));
+    }
+    if (options.method === 'PATCH') {
+      const found = rows.filter(r => matches(r,query));
+      for (const row of found) Object.assign(row,body);
+      return reply(prefer.includes('return=representation') ? found.map(r => structuredClone(r)) : '');
+    }
+    for (const item of [].concat(body)) {
+      const existing = rows.find(r => keys[table].every(k => r[k] === item[k]));
+      if (!existing) rows.push({...defaults[table],...(table==='insight_picks'?{active:true}:{}),...item});
+      else if (prefer.includes('merge-duplicates')) Object.assign(existing,item);
+      else assert.ok(prefer.includes('ignore-duplicates'),'duplicate insert without a conflict rule');
+    }
+    return reply('');
+  };
+  const player = (name,prices) => prices.flatMap(([book,over,under]) => [{book,name:'Over',description:name,point:20.5,price:over},{book,name:'Under',description:name,point:20.5,price:under}]);
+  const edge = [['A',-150,120],['B',-150,120],['C',-150,120],['D',-110,-110]];
+  world.lines = {first: player('Test Player',edge), flat: player('Test Player',[['A',-110,-110],['B',-110,-110],['C',-110,-110],['D',-110,-110]]), second: player('Second Player',edge)};
+  world.books = world.lines.first;
+  const odds = url => {
+    if (url.pathname.endsWith('/events')) { world.calls.events++; return reply([{id:EVENT,home_team:'AAA Team',away_team:'BBB Team',commence_time:TIP}]); }
+    if (url.searchParams.get('markets') === 'player_threes') { world.calls.scanner++; return reply({id:EVENT,bookmakers:[]},{'x-requests-last':'1','x-requests-used':'21','x-requests-remaining':'479'}); }
+    world.calls.quotes++;
+    const updated = new Date(Date.now()-300000).toISOString(), byBook = new Map();
+    for (const o of world.books) { if (!byBook.has(o.book)) byBook.set(o.book,[]); byBook.get(o.book).push({name:o.name,description:o.description,point:o.point,price:o.price}); }
+    world.remaining -= 1;
+    return reply({id:EVENT,bookmakers:[...byBook].map(([title,outcomes])=>({title,markets:[{key:'player_points',last_update:updated,outcomes}]}))},
+      {'x-requests-last':'1','x-requests-used':String(500-world.remaining),'x-requests-remaining':String(world.remaining)});
+  };
+  const espn = url => {
+    const path = url.pathname;
+    if (path.endsWith('/teams')) return reply({sports:[{leagues:[{teams:[{team:{id:'1',abbreviation:'AAA'}},{team:{id:'2',abbreviation:'BBB'}}]}]}]});
+    if (path.endsWith('/1/roster')) return reply({team:{abbreviation:'AAA'},athletes:[{id:'101',displayName:'Test Player'},{id:'102',displayName:'Second Player'}]});
+    if (path.endsWith('/2/roster')) return reply({team:{abbreviation:'BBB'},athletes:[]});
+    if (path.endsWith('/scoreboard')) return reply({events:[{date:TIP,season:{year:2027},status:{type:{shortDetail:'7:00 PM'}},competitions:[{competitors:[{team:{id:'1',abbreviation:'AAA'}},{team:{id:'2',abbreviation:'BBB'}}]}]}]});
+    const events = {}, rows = [];
+    for (let i=1; i<=12; i++) { events['g'+i] = {gameDate:`2026-11-${String(i).padStart(2,'0')}T00:30:00Z`,gameResult:'W',opponent:{abbreviation:'CCC'}}; rows.push({eventId:'g'+i,stats:['30','25','5','5']}); }
+    return reply({names:['minutes','points','totalRebounds','assists'],events,seasonTypes:[{displayName:'2026-27 Regular Season',categories:[{events:rows}]}]});
+  };
+  world.fetch = async (input,options={}) => {
+    const url = new URL(String(input));
+    if (url.hostname === 'store.test') return url.pathname.startsWith('/auth/') ? reply({id:'user-1'}) : store(url,{method:'GET',...options});
+    if (url.hostname === 'api.the-odds-api.com') return odds(url);
+    if (url.hostname.endsWith('espn.com')) return espn(url);
+    throw Error('Unexpected request to ' + url.hostname);
+  };
+  return world;
+}
+
+async function scenario(t, {now = NOON, env = {}} = {}) {
+  const world = fakeWorld(), realFetch = global.fetch, saved = {...process.env};
+  Object.assign(process.env,{SUPABASE_URL:'https://store.test',SUPABASE_PUBLISHABLE_KEY:'public',NBA_EDGE_SERVER_TOKEN:'test-token',ODDS_API_KEY:'key',...env});
+  for (const [key,value] of Object.entries(env)) if (value === null) delete process.env[key];
+  global.fetch = world.fetch;
+  t.mock.timers.enable({apis:['Date'],now});
+  t.after(() => { global.fetch = realFetch; for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key]; Object.assign(process.env,saved); });
+  world.insights = async () => { const res = makeRes(); await insightsHandler({method:'GET',query:{}},res); return res; };
+  world.lines = Object.assign(async (query={}) => { const res = makeRes(); await linesHandler({method:'GET',query},res); return res; }, world.lines);
+  return world;
+}
+
+test('the first visit after 11 AM buys one snapshot; later visits read the saved copy', async t => {
+  const world = await scenario(t);
+  const first = await world.insights();
+  assert.equal(first.statusCode,200);
+  assert.equal(first.body.status,'ready');
+  assert.deepEqual([world.calls.events,world.calls.quotes],[1,1]);
+  assert.equal(first.body.picks.length,1);
+  assert.equal(first.body.picks[0].player,'Test Player');
+  assert.equal(first.body.picks[0].active,true);
+  const board = await world.lines();
+  assert.equal(board.body.games.length,1);
+  const rows = await world.lines({event:EVENT});
+  assert.equal(rows.body.rows.length,4);
+  assert.ok(rows.body.updated);
+  await world.insights();
+  assert.deepEqual([world.calls.events,world.calls.quotes],[1,1],'no further provider calls');
+  const day = world.tables.odds_days[0];
+  assert.deepEqual([day.refreshes,day.credits_spent,day.credits_remaining],[1,1,479]);
+});
+
+test('many simultaneous visitors still cause a single provider refresh', async t => {
+  const world = await scenario(t);
+  const all = await Promise.all(Array.from({length:6},() => world.insights()));
+  assert.ok(all.every(res => res.statusCode === 200));
+  assert.deepEqual([world.calls.events,world.calls.quotes],[1,1]);
+  assert.equal((await world.insights()).body.picks.length,1);
+});
+
+test('nothing is bought before the first refresh hour', async t => {
+  const world = await scenario(t,{now:Date.parse('2026-11-15T14:00:00Z')});
+  const res = await world.insights();
+  assert.equal(res.body.status,'scheduled');
+  assert.deepEqual(res.body.picks,[]);
+  assert.deepEqual([world.calls.events,world.calls.quotes],[0,0]);
+});
+
+test('a suggested insight stays listed after a later update replaces it', async t => {
+  const world = await scenario(t,{env:{ODDS_REFRESHES_PER_DAY:'2'}});
+  assert.equal((await world.insights()).body.picks.length,1);
+  world.books = [...world.lines.flat,...world.lines.second];
+  t.mock.timers.setTime(NOON + 30*60000);
+  await world.insights();
+  assert.equal(world.calls.quotes,1,'second refresh waits for the minimum spacing');
+  t.mock.timers.setTime(NOON + 61*60000);
+  const later = await world.insights();
+  assert.equal(world.calls.quotes,2);
+  assert.deepEqual(later.body.picks.map(p => [p.player,p.active]),[['Second Player',true],['Test Player',false]]);
+  const kept = world.tables.insight_picks.find(r => r.player === 'Test Player');
+  assert.equal(kept.first_pick.price,-110,'the original suggestion is preserved');
+  t.mock.timers.setTime(NOON + 200*60000);
+  await world.insights();
+  assert.equal(world.calls.quotes,2,'daily limit of two refreshes holds');
+});
+
+test('a suggestion remains after its game has started', async t => {
+  const world = await scenario(t);
+  await world.insights();
+  t.mock.timers.setTime(Date.parse(TIP) + 3600000);
+  const res = await world.insights();
+  assert.equal(res.body.picks.length,1);
+  assert.equal((await world.lines()).body.games.length,0);
+  assert.equal(world.calls.quotes,1);
+});
+
+test('a refresh is skipped when the remaining allowance cannot cover it', async t => {
+  const world = await scenario(t);
+  world.tables.odds_days.push({...defaults.odds_days,slate_date:'2026-11-14',credits_remaining:2,usage_at:'2026-11-14T16:00:00.000Z'});
+  const res = await world.insights();
+  assert.equal(res.body.status,'allowance');
+  assert.equal(world.calls.quotes,0);
+});
+
+test('without the server token the public routes fail closed and call nothing', async t => {
+  const world = await scenario(t,{env:{NBA_EDGE_SERVER_TOKEN:null}});
+  assert.equal((await world.insights()).statusCode,503);
+  assert.equal((await world.lines()).statusCode,503);
+  assert.deepEqual(world.calls,{events:0,quotes:0,scanner:0,store:0});
+});
+
+test('the signed-in scanner stops at its daily credit allowance', async t => {
+  const world = await scenario(t,{env:{ODDS_SCANNER_DAILY_CREDITS:'1'}});
+  const ask = async market => { const res = makeRes(); await oddsHandler({method:'GET',query:{mode:'props',eventId:EVENT,market},headers:{authorization:'Bearer token'}},res); return res; };
+  assert.equal((await ask('player_threes')).statusCode,200);
+  assert.equal(world.calls.scanner,1);
+  const blocked = await ask('player_threes_alternate');
+  assert.equal(blocked.statusCode,429);
+  assert.equal(world.calls.scanner,1);
+  assert.equal(world.tables.odds_days[0].scanner_credits,1);
+});

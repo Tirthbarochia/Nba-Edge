@@ -9,6 +9,6 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
-    "check": "node --check app.js && node --check api/kalshi.js && node --check api/odds.js && node --check api/live.js"
+    "check": "for f in *.js api/*.js; do node --check \"$f\" || exit 1; done"
   }
 }

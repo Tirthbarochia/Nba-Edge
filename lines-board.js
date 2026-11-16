@@ -21,11 +21,11 @@ class LinesBoard extends HTMLElement {
     this.game.onchange = () => this.load();
     this.stat.onchange = this.book.onchange = () => this.draw();
     try {
-      const {games,date} = await read('/api/lines');
+      const {games,date,status,startHour} = await read('/api/lines');
       this.date = date;
       for (const g of games) this.game.add(new Option(g.away+' at '+g.home+' · '+time(g.tip)+' ET',g.id));
       if (games.length) await this.load();
-      else this.status.textContent = 'No upcoming NBA games left today.';
+      else this.status.textContent = {scheduled:'Today’s lines are saved at about '+(startHour%12||12)+(startHour<12?' AM':' PM')+' ET.',pending:'Today’s lines are being saved. Check back in a few minutes.',allowance:'Today’s lines were not updated because the sportsbook data allowance is used up.',provider:'The sportsbook feed could not be reached. It will be retried.'}[status] || 'No upcoming NBA games left today.';
     } catch (err) { this.status.textContent = err.message; }
   }
   async load() {
@@ -33,16 +33,16 @@ class LinesBoard extends HTMLElement {
     this.rows = []; this.body.replaceChildren(); this.book.replaceChildren();
     this.status.textContent = 'Loading sportsbook quotes…';
     try {
-      const {rows} = await read('/api/lines?event='+encodeURIComponent(this.game.value));
+      const {rows,updated} = await read('/api/lines?event='+encodeURIComponent(this.game.value));
       if (version !== this.version) return;
-      this.rows = rows;
+      this.rows = rows; this.saved = updated;
       for (const book of [...new Set(rows.map(r=>r.book))].sort()) this.book.add(new Option(book,book));
       this.draw();
     } catch (err) { if (version === this.version) this.status.textContent = err.message; }
   }
   draw() {
     const rows = this.rows.filter(r=>r.book === this.book.value && r.metric === this.stat.value).sort((a,b)=>a.player.localeCompare(b.player));
-    this.status.textContent = rows.length ? rows.length+' lines · Select a player to research this number.' : 'No lines available for this selection.';
+    this.status.textContent = rows.length ? rows.length+' lines'+(this.saved?' · Saved '+time(this.saved)+' ET':'')+' · Select a player to research this number.' : 'No lines available for this selection.';
     this.body.replaceChildren();
     for (const r of rows) {
       const tr = this.body.insertRow(), button = document.createElement('button');

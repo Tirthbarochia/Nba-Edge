@@ -1,5 +1,7 @@
 // NBA Edge: a server-only, authenticated proxy for The Odds API.
 // Never expose ODDS_API_KEY in a client asset or source-controlled .env file.
+import { configured, eastern } from '../store.js';
+import { scannerDay, scannerSpent } from '../snapshot.js';
 const SPORT = 'basketball_nba';
 const MARKETS = new Set(['player_points','player_rebounds','player_assists','player_threes','player_points_rebounds_assists','player_points_alternate','player_rebounds_alternate','player_assists_alternate','player_threes_alternate']);
 const cached = new Map();
@@ -33,6 +35,14 @@ export default async function handler(req, res) {
   const cacheKey = `${mode}|${eventId}|${requestedMarket}`;
   const existing = cached.get(cacheKey);
   if (existing && existing.expires > now()) return res.status(200).json({...existing.payload, cache: true});
+  // Each props request costs provider credits, so it draws on a small daily allowance.
+  let day = null;
+  if (mode === 'props') {
+    if (!configured()) return res.status(503).json({error:'The sportsbook scanner is temporarily unavailable.'});
+    try { day = await scannerDay(eastern.format(new Date())); }
+    catch { return res.status(503).json({error:'The sportsbook scanner is temporarily unavailable.'}); }
+    if (!day) return res.status(429).json({error:'Today\u2019s sportsbook scanner allowance has been used. It resets at midnight ET.'});
+  }
   const path = mode === 'events'
     ? `/v4/sports/${SPORT}/events`
     : `/v4/sports/${SPORT}/events/${eventId}/odds`;
@@ -48,6 +58,10 @@ export default async function handler(req, res) {
         upstream.status === 422 ? 'This market is unavailable for the selected event or plan.' :
         `Odds provider returned HTTP ${upstream.status}.`;
       return res.status(upstream.status === 429 ? 429 : 502).json({error});
+    }
+    if (day) {
+      const count = name => { const v = upstream.headers?.get?.(name); return v != null && v !== '' && Number.isFinite(Number(v)) ? Number(v) : null; };
+      await scannerSpent(day, {last:count('x-requests-last'), used:count('x-requests-used'), remaining:count('x-requests-remaining')}).catch(() => {});
     }
     const data = JSON.parse(rawText);
     let result;

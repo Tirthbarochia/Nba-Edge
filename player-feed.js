@@ -2,10 +2,21 @@ const site = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba';
 const common = 'https://site.web.api.espn.com/apis/common/v3/sports/basketball/nba';
 const metrics = {points:['points'],rebounds:['totalRebounds'],assists:['assists'],PRA:['points','totalRebounds','assists']};
 const eastern = date => new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(date));
+// Identical ESPN requests made within two minutes share one response, so building the daily
+// insights does not re-download the same scoreboard, roster or game log for every line.
+const recent = new Map();
 async function json(url) {
-  const r=await fetch(url,{signal:AbortSignal.timeout(9000)});
-  if(!r.ok) throw Error('Feed unavailable');
-  return r.json();
+  const saved=recent.get(url);
+  if(saved && saved.until>Date.now()) return saved.result;
+  for(const [key,entry] of recent) if(entry.until<=Date.now()) recent.delete(key);
+  const result=fetch(url,{signal:AbortSignal.timeout(9000)}).then(r=>{
+    if(!r.ok) throw Error('Feed unavailable');
+    return r.json();
+  });
+  const entry={until:Date.now()+120000,result};
+  recent.set(url,entry);
+  try { return await result; }
+  catch(error){ if(recent.get(url)===entry) recent.delete(url); throw error; }
 }
 export async function directory() {
   const teams=(await json(site+'/teams?limit=100')).sports[0].leagues[0].teams;

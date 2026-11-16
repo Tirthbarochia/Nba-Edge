@@ -50,6 +50,17 @@ npx vercel dev
 
 API keys should go into local `.env` files (not source control). `npm run check` performs syntax checks and `npm test` executes mock API tests without real credentials or an Internet connection.
 
+## Saved sportsbook snapshot and insight history
+
+Visitors never call The Odds API directly. `snapshot.js` buys one full-slate copy of today's player-prop lines on a budget, saves it in Supabase (`supabase/odds_store.sql`), and `/api/lines` and `/api/insights` read that saved copy.
+
+- Default budget: **one refresh per Eastern day**, not before 11 AM ET, triggered by the daily cron or the first visit after that hour. A refresh costs up to 3 credits per upcoming game (points, rebounds, assists; one region). The provider's reported remaining credits are recorded, and a refresh is skipped when they cannot cover it.
+- Change the budget with `ODDS_REFRESHES_PER_DAY`, `ODDS_REFRESH_MINUTES` and `ODDS_FIRST_REFRESH_HOUR_ET`. The signed-in Odds scanner has its own `ODDS_SCANNER_DAILY_CREDITS` allowance (default 10).
+- Every suggested insight is stored in `insight_picks` and stays listed for the rest of the day. A later refresh can add suggestions or mark an earlier one as no longer passing the filters; it never deletes one. `first_pick` keeps the suggestion exactly as first published.
+- The three tables are server-only. Server functions authenticate with `NBA_EDGE_SERVER_TOKEN`; the database stores only its SHA-256 hash. Without that variable the public routes return "unavailable" and spend nothing.
+
+Setup: run `supabase/odds_store.sql`, store the token hash as described at the end of that file, then add `NBA_EDGE_SERVER_TOKEN` to the Vercel project.
+
 ## Integrations
 
 | Source | Auth | What it provides | How integrated |
