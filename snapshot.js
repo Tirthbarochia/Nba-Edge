@@ -1,26 +1,38 @@
 // Budgeted sportsbook refresh. Visitors only ever read the copy saved in Supabase; this
-// module decides when a new copy may be bought from The Odds API and records what it cost.
+// module decides when a new copy may be fetched from a provider and records what it cost.
+//
+// Sources: SportsGameOdds is used first when SPORTSGAMEODDS_API_KEY is set (billed one object
+// per game returned). The Odds API is the backup (billed up to three credits per game).
 //
 // Rules (all configurable through server environment variables):
-//   ODDS_REFRESHES_PER_DAY      full-slate refreshes allowed per Eastern day (default 1)
-//   ODDS_REFRESH_MINUTES        minimum spacing between refreshes (default 60)
-//   ODDS_FIRST_REFRESH_HOUR_ET  no refresh before this Eastern hour (default 11)
+//   SGO_REFRESHES_PER_DAY       refreshes per Eastern day when SportsGameOdds is set (default 8)
+//   SGO_MONTHLY_OBJECTS         SportsGameOdds objects allowed per rolling 30 days (default 2500)
+//   ODDS_REFRESHES_PER_DAY      refreshes per day that may use The Odds API (default 1)
+//   ODDS_REFRESH_MINUTES        minimum spacing between refreshes (default 90 with SportsGameOdds, else 60)
+//   ODDS_FIRST_REFRESH_HOUR_ET  no refresh before this Eastern hour (default 10 with SportsGameOdds, else 11)
 //   ODDS_SCANNER_DAILY_CREDITS  daily credits the signed-in Odds scanner may spend (default 10)
-// A refresh is skipped when the provider's last reported remaining credits cannot cover it.
 import { db } from './store.js';
 import { upcoming, quotes, MAX_EVENT_COST } from './market-feed.js';
-import { generate, pickKey } from './insight-engine.js';
+import { sgoSlate } from './sgo-feed.js';
+import { generate, pickKey, normalize } from './insight-engine.js';
 
 const whole = (value, fallback, min, max) => {
   const n = Number.parseInt(value ?? '', 10);
   return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
 };
-export const settings = () => ({
-  perDay: whole(process.env.ODDS_REFRESHES_PER_DAY, 1, 0, 48),
-  minutes: whole(process.env.ODDS_REFRESH_MINUTES, 60, 10, 1440),
-  startHour: whole(process.env.ODDS_FIRST_REFRESH_HOUR_ET, 11, 0, 23),
-  scanner: whole(process.env.ODDS_SCANNER_DAILY_CREDITS, 10, 0, 100000)
-});
+export const settings = () => {
+  const sgo = Boolean(process.env.SPORTSGAMEODDS_API_KEY), backupPerDay = whole(process.env.ODDS_REFRESHES_PER_DAY, 1, 0, 48);
+  return {
+    sgo, backupPerDay,
+    perDay: sgo ? whole(process.env.SGO_REFRESHES_PER_DAY, 8, 0, 48) : backupPerDay,
+    monthly: whole(process.env.SGO_MONTHLY_OBJECTS, 2500, 0, 10000000),
+    minutes: whole(process.env.ODDS_REFRESH_MINUTES, sgo ? 90 : 60, 10, 1440),
+    startHour: whole(process.env.ODDS_FIRST_REFRESH_HOUR_ET, sgo ? 10 : 11, 0, 23),
+    scanner: whole(process.env.ODDS_SCANNER_DAILY_CREDITS, 10, 0, 100000)
+  };
+};
+// The largest NBA slate is 15 games, so this much room must remain before a SportsGameOdds call.
+const MAX_SLATE = 15;
 const hourET = now => Number(new Intl.DateTimeFormat('en-US', {timeZone:'America/New_York', hour:'numeric', hourCycle:'h23'}).format(new Date(now)));
 const iso = ms => new Date(ms).toISOString();
 const today = date => ({slate_date: 'eq.' + date});
@@ -47,38 +59,69 @@ export function due(day, now, s = settings()) {
   return !day?.last_started || now - Date.parse(day.last_started) >= s.minutes * 60000;
 }
 
-async function refresh(date, day, now) {
+// The same game must keep one id whichever provider supplied it.
+const gameId = (away, home) => normalize(away) + '-at-' + normalize(home);
+
+async function sgoRoom(date, s) {
+  const from = new Date(Date.parse(date + 'T00:00:00Z') - 29 * 86400000).toISOString().slice(0, 10);
+  const rows = await db('GET', 'odds_days', {query:{select:'sgo_objects', slate_date:'gte.' + from}});
+  return s.monthly - rows.reduce((sum, r) => sum + (r.sgo_objects || 0), 0);
+}
+
+async function oddsApiSlate(date, now) {
+  const games = await upcoming(date, now);
+  if (!games.length) return {games:[], credits:0, remaining:null, used:null};
+  const refuse = (quota, message) => { const error = Error(message); error.quota = quota; throw error; };
+  // Trust a saved "remaining credits" figure for a day only; after that the allowance may have reset.
+  const [latest] = await db('GET', 'odds_days', {query:{select:'credits_remaining,usage_at', credits_remaining:'not.is.null', order:'usage_at.desc', limit:'1'}});
+  if (latest && now - Date.parse(latest.usage_at) < 86400000 && latest.credits_remaining < games.length * MAX_EVENT_COST) refuse(true, 'Allowance too low');
+  const results = await Promise.allSettled(games.map(g => quotes(g.id)));
+  const good = results.filter(r => r.status === 'fulfilled').map(r => r.value);
+  if (!good.length) refuse(results.some(r => r.reason?.quota), 'Provider unavailable');
+  const known = key => good.map(r => r.usage[key]).filter(v => v !== null);
+  return {
+    games: games.map((g, i) => ({home:g.home_team, away:g.away_team, tip:g.commence_time, ok:results[i].status === 'fulfilled', rows:results[i].status === 'fulfilled' ? results[i].value.rows : []})),
+    credits: good.reduce((sum, r) => sum + (r.usage.last ?? (r.rows.length ? MAX_EVENT_COST : 0)), 0),
+    remaining: known('remaining').length ? Math.min(...known('remaining')) : null,
+    used: known('used').length ? Math.max(...known('used')) : null
+  };
+}
+
+async function refresh(date, day, now, s) {
   const mine = await claim(day, {last_started: iso(now), refreshes: day.refreshes + 1});
   if (!mine) return;
-  let spent = 0;
-  const skip = note => patch(date, {refreshes: day.refreshes, note});
+  let slate = null, source = null, note = 'provider', objects = 0, credits = 0;
+  const withLines = () => Boolean(slate) && slate.games.some(g => g.ok);
+  // A refresh that cost something stays counted, so a failing provider cannot be retried in a loop.
+  const stop = why => patch(date, {note:why, sgo_objects:(day.sgo_objects || 0) + objects, refreshes: day.refreshes + (objects || credits ? 1 : 0)});
   try {
-    const games = await upcoming(date, now);
-    if (!games.length) return await skip('no-games');
-    const [latest] = await db('GET', 'odds_days', {query:{select:'credits_remaining', credits_remaining:'not.is.null', order:'usage_at.desc', limit:'1'}});
-    if (latest && latest.credits_remaining < games.length * MAX_EVENT_COST) return await skip('allowance');
-    const results = await Promise.allSettled(games.map(g => quotes(g.id)));
-    const good = results.filter(r => r.status === 'fulfilled').map(r => r.value);
-    if (!good.length) return await skip(results.some(r => r.reason?.quota) ? 'allowance' : 'provider');
-    spent = good.reduce((sum, r) => sum + (r.usage.last ?? (r.rows.length ? MAX_EVENT_COST : 0)), 0);
-    const known = key => good.map(r => r.usage[key]).filter(v => v !== null);
-    const remaining = known('remaining').length ? Math.min(...known('remaining')) : null;
-    const used = known('used').length ? Math.max(...known('used')) : null;
+    if (s.sgo) {
+      if (await sgoRoom(date, s) < MAX_SLATE) note = 'allowance';
+      else try { slate = await sgoSlate(date, now); objects = slate.objects; source = 'sgo'; }
+      catch (error) { if (error?.quota) note = 'allowance'; else console.warn('sgo-refresh', String(error?.message || error).slice(0,160)); }
+      if (slate?.games.length && !withLines()) console.warn('sgo-refresh', 'games returned without player lines');
+    }
+    const empty = slate && !slate.games.length;
+    if (!empty && !withLines() && process.env.ODDS_API_KEY && (day.backup_refreshes || 0) < s.backupPerDay) {
+      try { slate = await oddsApiSlate(date, now); credits = slate.credits; source = 'odds-api'; }
+      catch (error) { if (error?.quota) note = 'allowance'; else console.warn('odds-refresh', String(error?.message || error).slice(0,160)); }
+    }
+    if (!slate) return await stop(note);
+    if (!slate.games.length) return await stop('no-games');
+    if (!withLines()) return await stop('no-lines');
     const fetched = iso(Date.now());
-    const row = (g, i) => ({slate_date:date, event_id:g.id, home:g.home_team, away:g.away_team, tip:g.commence_time,
-      ok: results[i].status === 'fulfilled', rows: results[i].status === 'fulfilled' ? results[i].value.rows : [], fetched_at: fetched});
-    const all = games.map(row), saved = all.filter(r => r.ok), failed = all.filter(r => !r.ok);
+    const all = slate.games.map(g => ({slate_date:date, event_id:gameId(g.away, g.home), home:g.home, away:g.away, tip:g.tip, ok:g.ok, rows:g.rows, fetched_at:fetched}));
+    const saved = all.filter(r => r.ok), failed = all.filter(r => !r.ok);
     await db('POST', 'odds_events', {query:{on_conflict:'slate_date,event_id'}, body:saved, prefer:'resolution=merge-duplicates,return=minimal'});
-    // A failed game must not erase a copy saved by an earlier refresh.
+    // A game without lines must not erase a copy saved by an earlier refresh.
     if (failed.length) await db('POST', 'odds_events', {query:{on_conflict:'slate_date,event_id'}, body:failed, prefer:'resolution=ignore-duplicates,return=minimal'});
-    await patch(date, {fetched_at:fetched, games:games.length, covered:saved.length, credits_spent:day.credits_spent + spent,
-      note:null, insights_at:null, insights_started:null,
-      ...(remaining === null ? {} : {credits_remaining:remaining, credits_used:used, usage_at:fetched})});
+    await patch(date, {fetched_at:fetched, games:all.length, covered:saved.length, source, note:null, insights_at:null, insights_started:null,
+      sgo_objects:(day.sgo_objects || 0) + objects, credits_spent:day.credits_spent + credits,
+      backup_refreshes:(day.backup_refreshes || 0) + (source === 'odds-api' ? 1 : 0),
+      ...(source === 'odds-api' && slate.remaining !== null ? {credits_remaining:slate.remaining, credits_used:slate.used, usage_at:fetched} : {})});
   } catch (error) {
-    // Credits already spent stay counted; a refresh that cost nothing may be retried later.
-    const note = error?.quota ? 'allowance' : 'provider';
-    if (!error?.quota) console.warn('odds-refresh', String(error?.message || error).slice(0,160));
-    await patch(date, spent ? {note} : {refreshes: day.refreshes, note}).catch(() => {});
+    console.warn('refresh', String(error?.message || error).slice(0,160));
+    await stop('provider').catch(() => {});
   }
 }
 
@@ -120,9 +163,9 @@ async function insights(date, day, now) {
 export async function ensure(date, now = Date.now()) {
   const s = settings();
   let day = await getDay(date);
-  if (process.env.ODDS_API_KEY && due(day, now, s)) {
+  if ((s.sgo || process.env.ODDS_API_KEY) && due(day, now, s)) {
     day ||= await openDay(date);
-    if (due(day, now, s)) { await refresh(date, day, now); day = await getDay(date); }
+    if (due(day, now, s)) { await refresh(date, day, now, s); day = await getDay(date); }
   }
   if (await insights(date, day, now)) day = await getDay(date);
   const status = day?.fetched_at ? 'ready' : day?.note || (hourET(now) < s.startHour ? 'scheduled' : 'pending');

@@ -9,7 +9,8 @@ import oddsHandler from '../api/odds.js';
 const NOON = Date.parse('2026-11-15T18:00:00Z');          // 1:00 PM Eastern
 const TIP = '2026-11-16T00:00:00Z';                        // 7:00 PM Eastern, same Eastern day
 const EVENT = 'evt0000000001';
-const defaults = {odds_days:{version:0,refreshes:0,last_started:null,fetched_at:null,games:0,covered:0,credits_spent:0,scanner_credits:0,credits_remaining:null,credits_used:null,usage_at:null,note:null,insights_started:null,insights_at:null}};
+const GAME = 'bbbteam-at-aaateam';                         // provider-independent id the site stores
+const defaults = {odds_days:{version:0,refreshes:0,last_started:null,fetched_at:null,games:0,covered:0,credits_spent:0,scanner_credits:0,credits_remaining:null,credits_used:null,usage_at:null,note:null,insights_started:null,insights_at:null,sgo_objects:0,backup_refreshes:0,source:null}};
 const keys = {odds_days:['slate_date'],odds_events:['slate_date','event_id'],insight_picks:['slate_date','pick_key']};
 
 function makeRes(){return {statusCode:200,headers:{},body:null,
@@ -20,13 +21,14 @@ const reply = (body,headers={}) => ({ok:true,status:200,headers:{get:name=>heade
 
 // A small in-memory stand-in for the Supabase REST API, covering the filters the site uses.
 function fakeWorld() {
-  const world = {tables:{odds_days:[],odds_events:[],insight_picks:[]}, calls:{events:0,quotes:0,scanner:0,store:0}, books:null, remaining:480};
+  const world = {tables:{odds_days:[],odds_events:[],insight_picks:[]}, calls:{events:0,quotes:0,scanner:0,store:0,sgo:0}, books:null, sgoProps:true, remaining:480};
   const matches = (row,query) => Object.entries(query).every(([column,filter]) => {
     if (['select','order','limit','on_conflict'].includes(column)) return true;
     if (filter === 'is.null') return row[column] == null;
     if (filter === 'not.is.null') return row[column] != null;
     if (filter === 'is.true') return row[column] === true;
     if (filter.startsWith('eq.')) return String(row[column]) === filter.slice(3);
+    if (filter.startsWith('gte.')) return String(row[column]) >= filter.slice(4);
     throw Error('Unsupported filter ' + filter);
   });
   const store = (url,options) => {
@@ -67,6 +69,20 @@ function fakeWorld() {
     return reply({id:EVENT,bookmakers:[...byBook].map(([title,outcomes])=>({title,markets:[{key:'player_points',last_update:updated,outcomes}]}))},
       {'x-requests-last':'1','x-requests-used':String(500-world.remaining),'x-requests-remaining':String(world.remaining)});
   };
+  const sgo = (url,options) => {
+    world.calls.sgo++;
+    assert.equal(options.headers['x-api-key'],'sgo-key');
+    assert.equal(url.searchParams.get('leagueID'),'NBA');
+    const odds = {}, players = {};
+    for (const o of world.sgoProps ? world.books : []) {
+      const id = o.description.toUpperCase().replace(/ /g,'_') + '_1_NBA', oddID = `points-${id}-game-ou-${o.name.toLowerCase()}`;
+      players[id] = {playerID:id, name:o.description};
+      odds[oddID] ||= {oddID, statID:'points', statEntityID:id, periodID:'game', betTypeID:'ou', sideID:o.name.toLowerCase(), byBookmaker:{}};
+      odds[oddID].byBookmaker[o.book] = {odds:(o.price > 0 ? '+' : '') + o.price, overUnder:String(o.point), available:true, lastUpdatedAt:'2026-11-15T09:00:00.000Z'};
+    }
+    odds['points-all-game-ou-over'] = {oddID:'points-all-game-ou-over', statID:'points', statEntityID:'all', periodID:'game', betTypeID:'ou', sideID:'over', byBookmaker:{A:{odds:'-110', overUnder:'224.5', available:true}}};
+    return reply({success:true, data:[{eventID:'sgo-1', status:{startsAt:TIP}, teams:{home:{names:{long:'AAA Team'}}, away:{names:{long:'BBB Team'}}}, players, odds}]});
+  };
   const espn = url => {
     const path = url.pathname;
     if (path.endsWith('/teams')) return reply({sports:[{leagues:[{teams:[{team:{id:'1',abbreviation:'AAA'}},{team:{id:'2',abbreviation:'BBB'}}]}]}]});
@@ -81,6 +97,7 @@ function fakeWorld() {
     const url = new URL(String(input));
     if (url.hostname === 'store.test') return url.pathname.startsWith('/auth/') ? reply({id:'user-1'}) : store(url,{method:'GET',...options});
     if (url.hostname === 'api.the-odds-api.com') return odds(url);
+    if (url.hostname === 'api.sportsgameodds.com') return sgo(url,options);
     if (url.hostname.endsWith('espn.com')) return espn(url);
     throw Error('Unexpected request to ' + url.hostname);
   };
@@ -90,6 +107,7 @@ function fakeWorld() {
 async function scenario(t, {now = NOON, env = {}} = {}) {
   const world = fakeWorld(), realFetch = global.fetch, saved = {...process.env};
   Object.assign(process.env,{SUPABASE_URL:'https://store.test',SUPABASE_PUBLISHABLE_KEY:'public',NBA_EDGE_SERVER_TOKEN:'test-token',ODDS_API_KEY:'key',...env});
+  if (!('SPORTSGAMEODDS_API_KEY' in env)) delete process.env.SPORTSGAMEODDS_API_KEY;
   for (const [key,value] of Object.entries(env)) if (value === null) delete process.env[key];
   global.fetch = world.fetch;
   t.mock.timers.enable({apis:['Date'],now});
@@ -110,7 +128,7 @@ test('the first visit after 11 AM buys one snapshot; later visits read the saved
   assert.equal(first.body.picks[0].active,true);
   const board = await world.lines();
   assert.equal(board.body.games.length,1);
-  const rows = await world.lines({event:EVENT});
+  const rows = await world.lines({event:GAME});
   assert.equal(rows.body.rows.length,4);
   assert.ok(rows.body.updated);
   await world.insights();
@@ -165,7 +183,7 @@ test('a suggestion remains after its game has started', async t => {
 
 test('a refresh is skipped when the remaining allowance cannot cover it', async t => {
   const world = await scenario(t);
-  world.tables.odds_days.push({...defaults.odds_days,slate_date:'2026-11-14',credits_remaining:2,usage_at:'2026-11-14T16:00:00.000Z'});
+  world.tables.odds_days.push({...defaults.odds_days,slate_date:'2026-11-14',credits_remaining:2,usage_at:'2026-11-15T03:00:00.000Z'});
   const res = await world.insights();
   assert.equal(res.body.status,'allowance');
   assert.equal(world.calls.quotes,0);
@@ -175,7 +193,7 @@ test('without the server token the public routes fail closed and call nothing', 
   const world = await scenario(t,{env:{NBA_EDGE_SERVER_TOKEN:null}});
   assert.equal((await world.insights()).statusCode,503);
   assert.equal((await world.lines()).statusCode,503);
-  assert.deepEqual(world.calls,{events:0,quotes:0,scanner:0,store:0});
+  assert.deepEqual(world.calls,{events:0,quotes:0,scanner:0,store:0,sgo:0});
 });
 
 test('the signed-in scanner stops at its daily credit allowance', async t => {
@@ -199,4 +217,67 @@ test('an exhausted provider allowance is reported as such and costs nothing', as
   const res = await world.insights();
   assert.equal(res.body.status,'allowance');
   assert.deepEqual([world.tables.odds_days[0].refreshes,world.tables.odds_days[0].credits_spent],[0,0]);
+});
+
+test('a stale allowance figure does not block the backup provider forever', async t => {
+  const world = await scenario(t);
+  world.tables.odds_days.push({...defaults.odds_days,slate_date:'2026-11-10',credits_remaining:0,usage_at:'2026-11-10T16:00:00.000Z'});
+  assert.equal((await world.insights()).body.status,'ready');
+  assert.equal(world.calls.quotes,1);
+});
+
+const SGO = {SPORTSGAMEODDS_API_KEY:'sgo-key'};
+test('SportsGameOdds is used first and bills one object per game', async t => {
+  const world = await scenario(t,{env:SGO});
+  const res = await world.insights();
+  assert.equal(res.body.status,'ready');
+  assert.deepEqual([world.calls.sgo,world.calls.events,world.calls.quotes],[1,0,0]);
+  assert.deepEqual(res.body.picks.map(p => [p.player,p.book,p.price,p.line]),[['Test Player','D',-110,20.5]]);
+  const day = world.tables.odds_days[0];
+  assert.deepEqual([day.source,day.sgo_objects,day.credits_spent,day.backup_refreshes],['sgo',1,0,0]);
+  assert.equal((await world.lines({event:GAME})).body.rows.length,4);
+  await world.insights();
+  assert.equal(world.calls.sgo,1,'later visits read the saved copy');
+});
+
+test('with SportsGameOdds the site refreshes through the day, spaced 90 minutes apart, up to the daily limit', async t => {
+  const world = await scenario(t,{env:{...SGO,SGO_REFRESHES_PER_DAY:'3'}});
+  await world.insights();
+  for (const minutes of [60,91,150,185,400]) { t.mock.timers.setTime(NOON + minutes*60000); await world.insights(); }
+  assert.equal(world.calls.sgo,3);
+  assert.equal(world.calls.quotes,0);
+  assert.equal(world.tables.odds_days[0].sgo_objects,3);
+});
+
+test('when the SportsGameOdds monthly allowance is nearly used, The Odds API backup is used once', async t => {
+  const world = await scenario(t,{env:SGO});
+  world.tables.odds_days.push({...defaults.odds_days,slate_date:'2026-11-01',sgo_objects:2490});
+  const res = await world.insights();
+  assert.equal(res.body.status,'ready');
+  assert.deepEqual([world.calls.sgo,world.calls.quotes],[0,1]);
+  const day = world.tables.odds_days.find(d => d.slate_date === '2026-11-15');
+  assert.deepEqual([day.source,day.backup_refreshes],['odds-api',1]);
+  t.mock.timers.setTime(NOON + 100*60000);
+  await world.insights();
+  assert.equal(world.calls.quotes,1,'the backup is limited to one refresh a day');
+});
+
+test('if SportsGameOdds returns games without player lines, the backup supplies them', async t => {
+  const world = await scenario(t,{env:SGO});
+  world.sgoProps = false;
+  t.mock.method(console,'warn',()=>{});
+  const res = await world.insights();
+  assert.equal(res.body.status,'ready');
+  assert.deepEqual([world.calls.sgo,world.calls.quotes],[1,1]);
+  const day = world.tables.odds_days[0];
+  assert.deepEqual([day.source,day.sgo_objects],['odds-api',1]);
+});
+
+test('with no backup allowance and no posted lines the page says so and the game list is not lost', async t => {
+  const world = await scenario(t,{env:{...SGO,ODDS_API_KEY:null}});
+  world.sgoProps = false;
+  t.mock.method(console,'warn',()=>{});
+  const res = await world.insights();
+  assert.equal(res.body.status,'no-lines');
+  assert.deepEqual([world.tables.odds_days[0].refreshes,world.tables.odds_days[0].sgo_objects],[1,1]);
 });

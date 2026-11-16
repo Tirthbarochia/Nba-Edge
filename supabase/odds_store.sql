@@ -72,6 +72,11 @@ create table if not exists public.insight_picks (
   primary key (slate_date, pick_key)
 );
 
+-- Second data source (SportsGameOdds): objects billed per day, backup-provider use, and source.
+alter table public.odds_days add column if not exists sgo_objects integer not null default 0;
+alter table public.odds_days add column if not exists backup_refreshes integer not null default 0;
+alter table public.odds_days add column if not exists source text;
+
 alter table public.odds_days enable row level security;
 alter table public.odds_events enable row level security;
 alter table public.insight_picks enable row level security;

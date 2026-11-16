@@ -25,7 +25,7 @@ class LinesBoard extends HTMLElement {
       this.date = date;
       for (const g of games) this.game.add(new Option(g.away+' at '+g.home+' · '+time(g.tip)+' ET',g.id));
       if (games.length) await this.load();
-      else this.status.textContent = {scheduled:'Today’s lines are saved at about '+(startHour%12||12)+(startHour<12?' AM':' PM')+' ET.',pending:'Today’s lines are being saved. Check back in a few minutes.',allowance:'Today’s lines were not updated because the sportsbook data allowance is used up.',provider:'The sportsbook feed could not be reached. It will be retried.'}[status] || 'No upcoming NBA games left today.';
+      else this.status.textContent = {scheduled:'Today’s lines are saved at about '+(startHour%12||12)+(startHour<12?' AM':' PM')+' ET.',pending:'Today’s lines are being saved. Check back in a few minutes.','no-lines':'Sportsbooks have not posted today’s player lines yet. It will be checked again.',allowance:'Today’s lines were not updated because the sportsbook data allowance is used up.',provider:'The sportsbook feed could not be reached. It will be retried.'}[status] || 'No upcoming NBA games left today.';
     } catch (err) { this.status.textContent = err.message; }
   }
   async load() {
