@@ -188,3 +188,15 @@ test('the signed-in scanner stops at its daily credit allowance', async t => {
   assert.equal(world.calls.scanner,1);
   assert.equal(world.tables.odds_days[0].scanner_credits,1);
 });
+
+test('an exhausted provider allowance is reported as such and costs nothing', async t => {
+  const world = await scenario(t);
+  const inner = world.fetch;
+  global.fetch = async (input,options) => String(input).includes('the-odds-api.com')
+    ? {ok:false,status:401,headers:{get:()=>null},json:async()=>({message:'Usage quota has been reached.',error_code:'OUT_OF_USAGE_CREDITS'})}
+    : inner(input,options);
+  t.mock.method(console,'warn',()=>{});
+  const res = await world.insights();
+  assert.equal(res.body.status,'allowance');
+  assert.deepEqual([world.tables.odds_days[0].refreshes,world.tables.odds_days[0].credits_spent],[0,0]);
+});

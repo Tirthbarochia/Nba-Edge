@@ -59,7 +59,7 @@ async function refresh(date, day, now) {
     if (latest && latest.credits_remaining < games.length * MAX_EVENT_COST) return await skip('allowance');
     const results = await Promise.allSettled(games.map(g => quotes(g.id)));
     const good = results.filter(r => r.status === 'fulfilled').map(r => r.value);
-    if (!good.length) return await skip('provider');
+    if (!good.length) return await skip(results.some(r => r.reason?.quota) ? 'allowance' : 'provider');
     spent = good.reduce((sum, r) => sum + (r.usage.last ?? (r.rows.length ? MAX_EVENT_COST : 0)), 0);
     const known = key => good.map(r => r.usage[key]).filter(v => v !== null);
     const remaining = known('remaining').length ? Math.min(...known('remaining')) : null;
@@ -74,9 +74,11 @@ async function refresh(date, day, now) {
     await patch(date, {fetched_at:fetched, games:games.length, covered:saved.length, credits_spent:day.credits_spent + spent,
       note:null, insights_at:null, insights_started:null,
       ...(remaining === null ? {} : {credits_remaining:remaining, credits_used:used, usage_at:fetched})});
-  } catch {
+  } catch (error) {
     // Credits already spent stay counted; a refresh that cost nothing may be retried later.
-    await patch(date, spent ? {note:'provider'} : {refreshes: day.refreshes, note:'provider'}).catch(() => {});
+    const note = error?.quota ? 'allowance' : 'provider';
+    if (!error?.quota) console.warn('odds-refresh', String(error?.message || error).slice(0,160));
+    await patch(date, spent ? {note} : {refreshes: day.refreshes, note}).catch(() => {});
   }
 }
 

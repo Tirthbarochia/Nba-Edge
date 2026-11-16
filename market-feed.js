@@ -10,7 +10,15 @@ const count = value => value != null && value !== '' && Number.isFinite(Number(v
 async function call(path, params) {
   params.set('apiKey', process.env.ODDS_API_KEY);
   const response = await fetch(base + path + '?' + params, {signal:AbortSignal.timeout(10000)});
-  if (!response.ok) throw Error('Provider unavailable');
+  if (!response.ok) {
+    // Log why the provider refused (status and its own error code; never the key or URL).
+    const detail = await response.json().catch(() => ({}));
+    const code = String(detail?.error_code || '').slice(0,60), message = String(detail?.message || '').slice(0,160);
+    console.warn('odds-provider', response.status, code, message);
+    const error = Error('Provider unavailable');
+    error.quota = /usage|quota|credit/i.test(code + ' ' + message);
+    throw error;
+  }
   const header = name => count(response.headers?.get?.(name));
   return {data: await response.json(), usage: {last: header('x-requests-last'), used: header('x-requests-used'), remaining: header('x-requests-remaining')}};
 }
