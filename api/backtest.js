@@ -16,9 +16,9 @@ async function json(url) {
 async function pool(items, n, fn) { let i = 0; await Promise.all(Array.from({length: n}, async () => { while (i < items.length) await fn(items[i++]); })); }
 async function load(season) {
   if (cache.has(season)) return cache.get(season);
-  const teams = (await json(site + '/teams?limit=100')).sports[0].leagues[0].teams.map(t => t.team);
-  const ids = new Map(); let missing = 0;
-  await pool(teams, 10, async t => { const r = await json(site + '/teams/' + t.id + '/roster?season=' + season); for (const a of r?.athletes || []) ids.set(a.id, a.displayName); });
+  // Every player with regular-season stats that season (team rosters are not kept for past seasons).
+  const list = await json(common + '/statistics/byathlete?season=' + season + '&seasontype=2&limit=1000');
+  const ids = new Map((list?.athletes || []).map(a => [String(a.athlete?.id), a.athlete?.displayName])); let missing = 0;
   const players = {};
   await pool([...ids.keys()], 16, async id => {
     const log = await json(common + '/athletes/' + id + '/gamelog?season=' + season);
