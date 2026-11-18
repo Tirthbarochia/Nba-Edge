@@ -66,7 +66,7 @@ export function summarize(rows, now = Date.now()) {
     units: Math.round(graded.reduce((sum, r) => sum + units(r.result, Number(r.first_pick?.price)), 0) * 100) / 100,
     streak, best,
     days: [...days.values()].reverse().slice(0, 14),
-    recent: graded.slice(-10).reverse().map(r => ({date: String(r.slate_date), player: r.player, metric: r.metric, line: Number(r.line), side: r.side,
+    recent: graded.slice(-25).reverse().map(r => ({date: String(r.slate_date), player: r.player, metric: r.metric, line: Number(r.line), side: r.side,
       price: Number(r.first_pick?.price) || null, book: r.first_pick?.book || null, result: r.result, actual: r.actual == null ? null : Number(r.actual)}))
   };
 }

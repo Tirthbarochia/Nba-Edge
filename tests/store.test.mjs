@@ -6,6 +6,7 @@ import insightsHandler from '../api/insights.js';
 import linesHandler from '../api/lines.js';
 import oddsHandler from '../api/odds.js';
 import { forget } from '../player-feed.js';
+import recordHandler from '../api/record.js';
 
 const NOON = Date.parse('2026-11-15T18:00:00Z');          // 1:00 PM Eastern
 const TIP = '2026-11-16T00:00:00Z';                        // 7:00 PM Eastern, same Eastern day
@@ -365,4 +366,18 @@ test("Claude's picks are listed and graded separately and are never touched by t
   const later = await world.insights();
   assert.deepEqual([later.body.record.hits,later.body.record.misses],[1,0]);
   assert.deepEqual([later.body.claude.record.hits,later.body.claude.record.units,later.body.claude.picks[0].result],[1,1.2,'hit']);
+});
+
+test('the Track record route returns a separate graded record for each model', async t => {
+  const world = await scenario(t);
+  await world.insights();
+  world.tables.insight_picks.push({slate_date:'2026-11-15',pick_key:'claude_secondplayer_points_20p5_under',player:'Second Player',metric:'points',line:20.5,side:'Under',author:'claude',active:true,
+    first_pick:{tip:TIP,price:-110,book:'A'},pick:{},first_suggested_at:'2026-11-15T20:00:00.000Z',last_confirmed_at:'2026-11-15T20:00:00.000Z'});
+  world.final = {'101':25,'102':22};
+  t.mock.timers.setTime(Date.parse(TIP) + 4*3600000);
+  const res = makeRes();
+  await recordHandler({method:'GET',query:{}},res);
+  assert.equal(res.statusCode,200);
+  assert.deepEqual([res.body.site.hits,res.body.site.misses,res.body.claude.hits,res.body.claude.misses],[1,0,0,1]);
+  assert.deepEqual([res.body.site.recent[0].player,res.body.claude.recent[0].player],['Test Player','Second Player']);
 });
