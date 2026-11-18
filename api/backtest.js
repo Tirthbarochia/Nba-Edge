@@ -37,12 +37,20 @@ async function load(season) {
     if (games.size) players[id] = {name: ids.get(id), games: [...games.values()]};
   });
   const data = {season, players, roster: ids.size, missing, fetched: new Date().toISOString()};
+  if (Object.keys(players).length < 100) return {data, prep: prepare(data)};
   cache.set(season, {data, prep: prepare(data)});
   return cache.get(season);
 }
 const trim = r => r && ({...r, calibration: r.calibration});
 export default async function handler(req, res) {
   if (process.env.VERCEL_ENV === 'production') return res.status(404).end();
+  if (req.query.mode === 'peek') {
+    const url = new URL(String(req.query.u));
+    if (!/(^|\.)espn\.com$/.test(url.hostname)) return res.status(400).end();
+    const d = await json(url);
+    let v = d; for (const k of String(req.query.p || '').split('.').filter(Boolean)) v = v?.[k];
+    return res.json({text: JSON.stringify(v)?.slice(0, Number(req.query.n || 3000))});
+  }
   const t0 = Date.now();
   const season = String(req.query.season || '2026');
   const {data, prep} = await load(season);
