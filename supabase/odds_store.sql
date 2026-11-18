@@ -77,6 +77,12 @@ alter table public.odds_days add column if not exists sgo_objects integer not nu
 alter table public.odds_days add column if not exists backup_refreshes integer not null default 0;
 alter table public.odds_days add column if not exists source text;
 
+-- Track record: each insight is graded once its game is final (hit, miss, push, or void).
+alter table public.insight_picks add column if not exists result text check (result in ('hit','miss','push','void'));
+alter table public.insight_picks add column if not exists actual numeric;
+alter table public.insight_picks add column if not exists graded_at timestamptz;
+alter table public.insight_picks add column if not exists grade_checked_at timestamptz;
+
 alter table public.odds_days enable row level security;
 alter table public.odds_events enable row level security;
 alter table public.insight_picks enable row level security;

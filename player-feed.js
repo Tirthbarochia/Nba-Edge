@@ -18,6 +18,8 @@ async function json(url) {
   try { return await result; }
   catch(error){ if(recent.get(url)===entry) recent.delete(url); throw error; }
 }
+// Clears the shared response cache (used by tests).
+export const forget = () => recent.clear();
 export async function directory() {
   const teams=(await json(site+'/teams?limit=100')).sports[0].leagues[0].teams;
   const rosters=await Promise.all(teams.map(async ({team})=>{
@@ -51,4 +53,26 @@ export async function card(q) {
     }
   }
   return {name:athlete.displayName,club:roster.team.abbreviation,photo:athlete.headshot?.href,date,metric,opponent:opponent?.abbreviation||null,status:event?.status.type.shortDetail||null,games:[...games.values()].sort((a,b)=>b.date.localeCompare(a.date)),aiAvailable:Boolean(process.env.OPENAI_API_KEY)};
+}
+
+// Final result of one player's stat in his team's game on `date` (Eastern), for grading.
+// Returns {status:'final', value}, {status:'pending'} while the game is unfinished,
+// {status:'missing'} when the game is over but the player has no box score line, or
+// {status:'no-game'} when his team did not play that day.
+export async function outcome({player,team,metric,date}) {
+  const names=metrics[metric];
+  if(!/^\d{1,9}$/.test(player)||!/^\d{1,2}$/.test(team)||!Array.isArray(names)||!/^20\d{2}-\d\d-\d\d$/.test(date)) return null;
+  const board=await json(site+'/scoreboard?dates='+date.replaceAll('-',''));
+  const event=board.events.find(e=>eastern(e.date)===date && e.competitions[0].competitors.some(c=>c.team.id===team));
+  if(!event) return {status:'no-game'};
+  if(!event.status?.type?.completed) return {status:'pending'};
+  const log=await json(common+'/athletes/'+player+'/gamelog?season='+event.season.year);
+  const cols=names.map(n=>log.names?.indexOf(n)??-1);
+  for(const group of log.seasonTypes||[]) for(const category of group.categories||[]) for(const row of category.events||[]) {
+    const game=log.events?.[row.eventId];
+    if(!game?.gameDate||(row.eventId!==event.id&&eastern(game.gameDate)!==date)||!['W','L'].includes(game.gameResult))continue;
+    const values=cols.map(i=>row.stats?.[i]);
+    if(values.every(v=>/^\d+$/.test(String(v)))) return {status:'final',value:values.reduce((sum,v)=>sum+Number(v),0)};
+  }
+  return {status:'missing'};
 }

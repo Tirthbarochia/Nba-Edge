@@ -61,7 +61,7 @@ export async function generate(date,games,now) {
       if (!data?.opponent || data.games.length<10) return;
       for (const quote of offers) {
         const evidence = screen(quote,data.games);
-        if (evidence) qualified.push({...quote,...evidence,photo:data.photo,games:data.games.slice(0,10)});
+        if (evidence) qualified.push({...quote,...evidence,athlete:athlete.id,team:athlete.team,photo:data.photo,games:data.games.slice(0,10)});
       }
     }));
   }

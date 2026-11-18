@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import insightsHandler from '../api/insights.js';
 import linesHandler from '../api/lines.js';
 import oddsHandler from '../api/odds.js';
+import { forget } from '../player-feed.js';
 
 const NOON = Date.parse('2026-11-15T18:00:00Z');          // 1:00 PM Eastern
 const TIP = '2026-11-16T00:00:00Z';                        // 7:00 PM Eastern, same Eastern day
@@ -88,9 +89,11 @@ function fakeWorld() {
     if (path.endsWith('/teams')) return reply({sports:[{leagues:[{teams:[{team:{id:'1',abbreviation:'AAA'}},{team:{id:'2',abbreviation:'BBB'}}]}]}]});
     if (path.endsWith('/1/roster')) return reply({team:{abbreviation:'AAA'},athletes:[{id:'101',displayName:'Test Player'},{id:'102',displayName:'Second Player'}]});
     if (path.endsWith('/2/roster')) return reply({team:{abbreviation:'BBB'},athletes:[]});
-    if (path.endsWith('/scoreboard')) return reply({events:[{date:TIP,season:{year:2027},status:{type:{shortDetail:'7:00 PM'}},competitions:[{competitors:[{team:{id:'1',abbreviation:'AAA'}},{team:{id:'2',abbreviation:'BBB'}}]}]}]});
+    if (path.endsWith('/scoreboard')) { world.calls.scoreboard = (world.calls.scoreboard || 0) + 1; return reply({events:[{id:'g99',date:TIP,season:{year:2027},status:{type:{shortDetail:world.final ? 'Final' : '7:00 PM',completed:Boolean(world.final)}},competitions:[{competitors:[{team:{id:'1',abbreviation:'AAA'}},{team:{id:'2',abbreviation:'BBB'}}]}]}]}); }
     const events = {}, rows = [];
     for (let i=1; i<=12; i++) { events['g'+i] = {gameDate:`2026-11-${String(i).padStart(2,'0')}T00:30:00Z`,gameResult:'W',opponent:{abbreviation:'CCC'}}; rows.push({eventId:'g'+i,stats:['30','25','5','5']}); }
+    const final = world.final?.[path.split('/').at(-2)];
+    if (final != null) { events.g99 = {gameDate:TIP,gameResult:'L',opponent:{abbreviation:'BBB'}}; rows.unshift({eventId:'g99',stats:['31',String(final),'4','6']}); }
     return reply({names:['minutes','points','totalRebounds','assists'],events,seasonTypes:[{displayName:'2026-27 Regular Season',categories:[{events:rows}]}]});
   };
   world.fetch = async (input,options={}) => {
@@ -105,6 +108,7 @@ function fakeWorld() {
 }
 
 async function scenario(t, {now = NOON, env = {}} = {}) {
+  forget();
   const world = fakeWorld(), realFetch = global.fetch, saved = {...process.env};
   Object.assign(process.env,{SUPABASE_URL:'https://store.test',SUPABASE_PUBLISHABLE_KEY:'public',NBA_EDGE_SERVER_TOKEN:'test-token',ODDS_API_KEY:'key',...env});
   if (!('SPORTSGAMEODDS_API_KEY' in env)) delete process.env.SPORTSGAMEODDS_API_KEY;
@@ -280,4 +284,64 @@ test('with no backup allowance and no posted lines the page says so and the game
   const res = await world.insights();
   assert.equal(res.body.status,'no-lines');
   assert.deepEqual([world.tables.odds_days[0].refreshes,world.tables.odds_days[0].sgo_objects],[1,1]);
+});
+
+// Track record: each published insight is graded from the final box score.
+test('a finished pick is graded at its line and the record and streak are reported', async t => {
+  const world = await scenario(t);
+  const first = await world.insights();
+  assert.deepEqual(first.body.record,{hits:0,misses:0,pushes:0,voids:0,pending:0,rate:null,units:0,streak:null,best:0,days:[],recent:[]});
+  const saved = world.tables.insight_picks[0];
+  assert.deepEqual([saved.first_pick.athlete,saved.first_pick.team],['101','1'],'player id is stored for grading');
+  t.mock.timers.setTime(Date.parse(TIP) + 2*3600000);
+  assert.equal((await world.insights()).body.record.pending,1,'started but too early to grade');
+  world.final = {'101':24};
+  t.mock.timers.setTime(Date.parse(TIP) + 3.5*3600000);
+  const res = await world.insights();
+  const r = res.body.record;
+  assert.deepEqual([r.hits,r.misses,r.rate,r.streak,r.best,r.pending],[1,0,1,{result:'hit',count:1},1,0]);
+  assert.equal(r.units,0.91,'one unit at -110 returns 0.91');
+  assert.deepEqual(r.days,[{date:'2026-11-15',hits:1,misses:0,pushes:0,voids:0}]);
+  assert.deepEqual(r.recent[0],{date:'2026-11-15',player:'Test Player',metric:'points',line:20.5,side:'Over',price:-110,book:'D',result:'hit',actual:24});
+  assert.deepEqual([res.body.picks[0].result,res.body.picks[0].actual],['hit',24]);
+});
+
+test('an unfinished game is re-checked at most every 30 minutes, and a pick graded once stays graded', async t => {
+  const world = await scenario(t);
+  await world.insights();
+  t.mock.timers.setTime(Date.parse(TIP) + 3.5*3600000);
+  await world.insights();
+  const checks = world.calls.scoreboard;
+  t.mock.timers.setTime(Date.parse(TIP) + 3.8*3600000);
+  await world.insights();
+  assert.equal(world.calls.scoreboard,checks,'no new box-score lookup within 30 minutes');
+  world.final = {'101':12};
+  t.mock.timers.setTime(Date.parse(TIP) + 4.1*3600000);
+  assert.equal((await world.insights()).body.record.misses,1);
+  world.final = {'101':40};
+  t.mock.timers.setTime(Date.parse(TIP) + 6*3600000);
+  const r = (await world.insights()).body.record;
+  assert.deepEqual([r.hits,r.misses,r.units,r.streak],[0,1,-1,{result:'miss',count:1}]);
+});
+
+test('a player with no box score line 36 hours after tip-off is void and does not count', async t => {
+  const world = await scenario(t);
+  await world.insights();
+  world.final = {'999':30};
+  t.mock.timers.setTime(Date.parse(TIP) + 5*3600000);
+  assert.equal((await world.insights()).body.record.voids,0,'waits before calling it void');
+  t.mock.timers.setTime(Date.parse(TIP) + 37*3600000);
+  const r = (await world.insights()).body.record;
+  assert.deepEqual([r.voids,r.hits,r.misses,r.rate,r.streak],[1,0,0,null,null]);
+});
+
+test('picks saved before player ids were stored are matched by name for grading', async t => {
+  const world = await scenario(t);
+  await world.insights();
+  delete world.tables.insight_picks[0].first_pick.athlete;
+  delete world.tables.insight_picks[0].first_pick.team;
+  world.final = {'101':20};
+  t.mock.timers.setTime(Date.parse(TIP) + 4*3600000);
+  const r = (await world.insights()).body.record;
+  assert.deepEqual([r.misses,r.recent[0].actual],[1,20]);
 });
