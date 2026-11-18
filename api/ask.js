@@ -16,7 +16,7 @@ export default async function handler(req,res){
       if(!auth.ok)return res.status(401).json({error:'Sign in again to request an AI explanation.'});
     }
     const q=explain?req.body:req.query;
-    const result=await card(q||{});
+    const result=await card(q||{},{model:!explain});
     if(!result)return res.status(400).json({error:'Select a current NBA player, date and stat.'});
     if(!explain){
       res.setHeader('Cache-Control','public,s-maxage=90');

@@ -7,6 +7,7 @@ import linesHandler from '../api/lines.js';
 import oddsHandler from '../api/odds.js';
 import { forget } from '../player-feed.js';
 import recordHandler from '../api/record.js';
+import askHandler from '../api/ask.js';
 
 const NOON = Date.parse('2026-11-15T18:00:00Z');          // 1:00 PM Eastern
 const TIP = '2026-11-16T00:00:00Z';                        // 7:00 PM Eastern, same Eastern day
@@ -88,11 +89,18 @@ function fakeWorld() {
   const espn = url => {
     const path = url.pathname;
     if (path.endsWith('/teams')) return reply({sports:[{leagues:[{teams:[{team:{id:'1',abbreviation:'AAA'}},{team:{id:'2',abbreviation:'BBB'}}]}]}]});
-    if (path.endsWith('/1/roster')) return reply({team:{abbreviation:'AAA'},athletes:[{id:'101',displayName:'Test Player'},{id:'102',displayName:'Second Player'}]});
+    if (path.endsWith('/1/roster')) return reply({team:{abbreviation:'AAA'},athletes:[{id:'101',displayName:'Test Player'},{id:'102',displayName:'Second Player',injuries:world.injured ? [{status:'Out'}] : []}]});
+    if (path.endsWith('/statistics/byteam')) return reply(world.byteam);
     if (path.endsWith('/2/roster')) return reply({team:{abbreviation:'BBB'},athletes:[]});
-    if (path.endsWith('/scoreboard')) { world.calls.scoreboard = (world.calls.scoreboard || 0) + 1; return reply({events:[{id:'g99',date:TIP,season:{year:2027},status:{type:{shortDetail:world.final ? 'Final' : '7:00 PM',completed:Boolean(world.final)}},competitions:[{competitors:[{team:{id:'1',abbreviation:'AAA'}},{team:{id:'2',abbreviation:'BBB'}}]}]}]}); }
+    if (path.endsWith('/scoreboard')) { world.calls.scoreboard = (world.calls.scoreboard || 0) + 1; return reply({events:[{id:'g99',date:TIP,season:{year:2027},status:{type:{shortDetail:world.final ? 'Final' : '7:00 PM',completed:Boolean(world.final)}},competitions:[{competitors:[{homeAway:'home',team:{id:'1',abbreviation:'AAA'}},{homeAway:'away',team:{id:'2',abbreviation:'BBB'}}]}]}]}); }
     const events = {}, rows = [];
-    for (let i=1; i<=12; i++) { events['g'+i] = {gameDate:`2026-11-${String(i).padStart(2,'0')}T00:30:00Z`,gameResult:'W',opponent:{abbreviation:'CCC'}}; rows.push({eventId:'g'+i,stats:['30','25','5','5']}); }
+    const who = path.split('/').at(-2);
+    for (let i=1; i<=12; i++) {
+      // Player 102 sat out games 9-12; player 101 scored more in those games.
+      if (world.injured && who === '102' && i > 8) continue;
+      events['g'+i] = {gameDate:`2026-11-${String(i).padStart(2,'0')}T00:30:00Z`,gameResult:'W',atVs:i % 2 ? 'vs' : '@',team:{id:'1'},opponent:{id:'3',abbreviation:'CCC'}};
+      rows.push({eventId:'g'+i,stats:['30', world.injured && who === '101' && i > 8 ? '31' : '25','5','5']});
+    }
     const final = world.final?.[path.split('/').at(-2)];
     if (final != null) { events.g99 = {gameDate:TIP,gameResult:'L',opponent:{abbreviation:'BBB'}}; rows.unshift({eventId:'g99',stats:['31',String(final),'4','6']}); }
     return reply({names:['minutes','points','totalRebounds','assists'],events,seasonTypes:[{displayName:'2026-27 Regular Season',categories:[{events:rows}]}]});
@@ -380,4 +388,28 @@ test('the Track record route returns a separate graded record for each model', a
   assert.equal(res.statusCode,200);
   assert.deepEqual([res.body.site.hits,res.body.site.misses,res.body.claude.hits,res.body.claude.misses],[1,0,0,1]);
   assert.deepEqual([res.body.site.recent[0].player,res.body.claude.recent[0].player],['Test Player','Second Player']);
+});
+
+test('the Prop analyzer returns a matchup projection with teammates out, venue and opponent', async t => {
+  const world = await scenario(t);
+  world.injured = true;
+  const team = (id, abbr, pts) => ({team:{id, abbreviation:abbr}, categories:[
+    {name:'general', splitId:'0', values:[0,0,0,0,0,0,0,12]}, {name:'general', splitId:'900', values:[0,44]},
+    {name:'offensive', splitId:'900', values:[pts,0,0,0,0,0,0,0,0,0,0,0,0,27]}]});
+  world.byteam = {categories:[{name:'general', names:['totalRebounds','avgRebounds','x','x','x','x','x','gamesPlayed']}, {name:'general'},
+    {name:'offensive', names:['avgPoints','x','x','x','x','x','x','x','x','x','x','x','x','avgAssists']}, {name:'offensive'}],
+    teams:[team('1','AAA',110), team('2','BBB',125), team('3','CCC',115)]};
+  const res = makeRes();
+  await askHandler({method:'GET', query:{player:'101', team:'1', date:'2026-11-15', metric:'points'}}, res);
+  assert.equal(res.statusCode, 200);
+  const m = res.body.model;
+  assert.ok(m, 'projection attached');
+  assert.equal(m.home, true);
+  const step = key => m.steps.find(s => s.key === key);
+  assert.match(step('teammates').detail, /Second Player out · 4 games without/);
+  assert.ok(step('teammates').change > 0);
+  assert.match(step('opponent').detail, /BBB allow 125\.0 per game · league 116\.7/);
+  assert.ok(step('opponent').change > 0);
+  assert.ok(step('venue'));
+  assert.ok(m.mean > 25);
 });
