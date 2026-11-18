@@ -17,7 +17,7 @@ export const STATS = ['points', 'rebounds', 'assists'];
 // Settings. The backtest tunes these; see docs/backtest.md for the evidence behind each value.
 export const DEFAULTS = {
   rateHalfLife: 10, minutesHalfLife: 3,
-  teammates: true, teammateK: 5, teammateMinGames: 3,
+  teammates: true, teammateMode: 'blend', teammateK: 5, teammateMinGames: 3, teammateCap: 0.25,
   venue: true, venueK: 15, venueCap: 0.08,
   opponent: true, opponentK: 10, opponentCap: 0.12,
   dispersionFloor: 1.05, dispersionScale: 1
@@ -42,7 +42,22 @@ export function projectStat(games, {home = null, opponent = null, teammatesOut =
   let r = rate, m = minutes;
 
   const without = played.filter(g => g.without);
-  if (P.teammates && teammatesOut.length) {
+  if (P.teammates && P.teammateMode === 'ratio' && teammatesOut.length) {
+    // Per-game output without the absent teammates vs with them, shrunk, applied only for the part
+    // not already in the recency-weighted baseline (recent games may already be without them).
+    const withThem = played.filter(g => !g.without);
+    if (without.length >= P.teammateMinGames && withThem.length >= 3) {
+      const avg = list => list.reduce((t, g) => t + g.value, 0) / list.length;
+      const ratio = avg(withThem) > 0 ? avg(without) / avg(withThem) : 1;
+      let wAll = 0, wWithout = 0;
+      played.forEach((g, i) => { const w = 2 ** (-i / P.rateHalfLife); wAll += w; if (g.without) wWithout += w; });
+      const factor = clamp(shrink(ratio, without.length, P.teammateK) ** (1 - wWithout / wAll), 1 - P.teammateCap, 1 + P.teammateCap);
+      steps.push({key:'teammates', label:'Teammates out', change:r * m * (factor - 1), detail:teammatesOut.join(', ') + ' out · ' + without.length + ' games without'});
+      r *= factor;
+    } else {
+      steps.push({key:'teammates', label:'Teammates out', change:0, detail:teammatesOut.join(', ') + ' out · too few games without to measure (' + without.length + ')'});
+    }
+  } else if (P.teammates && teammatesOut.length) {
     if (without.length >= P.teammateMinGames) {
       const lambda = without.length / (without.length + P.teammateK);
       const rw = weighted(without, P.rateHalfLife, g => g.value) / weighted(without, P.rateHalfLife, g => g.minutes);
