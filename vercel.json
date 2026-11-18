@@ -31,6 +31,9 @@
     },
     "api/lines.js": {
       "maxDuration": 60
+    },
+    "api/backtest.js": {
+      "maxDuration": 300
     }
   }
 }
