@@ -20,7 +20,7 @@ export const DEFAULTS = {
   teammates: true, teammateMode: 'blend', teammateK: 5, teammateMinGames: 3, teammateCap: 0.25,
   venue: true, venueK: 15, venueCap: 0.08,
   opponent: true, opponentK: 10, opponentCap: 0.12,
-  dispersionFloor: 1.05, dispersionScale: 1
+  dispersionFloor: 1.05, dispersionScale: 1, meanScale: 1
 };
 const weighted = (rows, halfLife, pick) => {
   let sum = 0, total = 0;
@@ -90,6 +90,8 @@ export function projectStat(games, {home = null, opponent = null, teammatesOut =
   const mean = weighted(played, P.rateHalfLife, g => g.value);
   const variance = weighted(played, P.rateHalfLife, g => (g.value - mean) ** 2);
   const dispersion = Math.max(P.dispersionFloor, P.dispersionScale * (mean > 0 ? variance / mean : 1));
+  // Calibration: a small uniform correction measured by backtest (projections ran slightly low).
+  if (P.meanScale !== 1) { steps.push({key:'calibration', label:'Backtest calibration', change:base * (P.meanScale - 1), detail:'Projections ran slightly low in past seasons'}); base *= P.meanScale; }
   return {mean: base, dispersion, rate, minutes, projectedMinutes: m, games: played.length, steps,
     baseline: rate * minutes};
 }
@@ -102,7 +104,7 @@ export function projectAll(games, context = {}, settings = {}) {
     const sum = games.map(g => ({...g, value: STATS.reduce((t, s) => t + g.values[s], 0)}));
     const raw = projectStat(sum, {...context, opponent: null}, settings);
     const mean = STATS.reduce((t, s) => t + out[s].mean, 0);
-    const steps = ['teammates', 'venue', 'opponent'].map(key => {
+    const steps = ['teammates', 'venue', 'opponent', 'calibration'].map(key => {
       const parts = STATS.map(s => out[s].steps.find(x => x.key === key)).filter(Boolean);
       return parts.length ? {key, label:parts[0].label, change:parts.reduce((t, x) => t + x.change, 0), detail:parts[0].key === 'opponent' ? 'Points, rebounds and assists allowed combined' : parts[0].detail} : null;
     }).filter(Boolean);
