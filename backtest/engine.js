@@ -105,14 +105,20 @@ export function walk(prep, settings = {}, {minGames = 5, minMinutes = 20} = {}) 
         if (!m || m.projectedMinutes < minMinutes) continue;
         const values = games.map(x => x.values[s]);
         const last10 = values.slice(0, 10).reduce((a, b) => a + b, 0) / Math.min(10, values.length);
-        const line = Math.floor(last10) + 0.5;                 // a market-like line near recent form
         const actual = g[COL[s]];
-        const proj = lineChance(m, line, 'Over');
-        rows.push({date, stat: s, player: p.id, actual, line, over: actual > line ? 1 : 0,
-          mean: m.mean, last10, season: values.reduce((a, b) => a + b, 0) / values.length,
-          pModel: proj ? Math.min(0.995, Math.max(0.005, proj.chance)) : 0.5,
-          pOld: (estimate(games.map(x => ({value: x.values[s]})), line, 'Over') ?? 50) / 100,
-          teammatesOut: out.length > 0, adjusted: m.steps.reduce((t, x) => t + Math.abs(x.change), 0)});
+        const season = values.reduce((a, b) => a + b, 0) / values.length;
+        // Predictive log-likelihood of the actual result (a proper score that needs no line), for
+        // the model and for the same spread centred on the season and last-10 averages.
+        const ll = mean => Math.log(Math.max(1e-9, lineChance({mean: Math.max(0.05, mean), dispersion: m.dispersion}, actual, 'Over')?.push || 0));
+        const base = {date, stat: s, player: p.id, actual, mean: m.mean, last10, season,
+          llModel: ll(m.mean), llSeason: ll(season), llLast10: ll(last10), teammatesOut: out.length > 0};
+        // Lines on both sides of recent form, so neither Over nor Under is favored by construction.
+        for (const line of [Math.floor(last10) + 0.5, Math.floor(last10) - 0.5].filter(l => l > 0)) {
+          const proj = lineChance(m, line, 'Over');
+          rows.push({...base, line, over: actual > line ? 1 : 0,
+            pModel: proj ? Math.min(0.995, Math.max(0.005, proj.chance)) : 0.5,
+            pOld: (estimate(games.map(x => ({value: x.values[s]})), line, 'Over') ?? 50) / 100});
+        }
       }
     });
   }
@@ -137,6 +143,7 @@ export function score(rows) {
   return {
     n, overRate: mean(r => r.over),
     mae: {model: mean(r => Math.abs(r.mean - r.actual)), last10: mean(r => Math.abs(r.last10 - r.actual)), season: mean(r => Math.abs(r.season - r.actual))},
+    likelihood: {model: mean(r => r.llModel), season: mean(r => r.llSeason), last10: mean(r => r.llLast10)},
     brier: {model: mean(r => (r.pModel - r.over) ** 2), old: mean(r => (r.pOld - r.over) ** 2), coin: mean(r => (0.5 - r.over) ** 2)},
     logLoss: {model: mean(r => logLoss(r.pModel, r.over)), old: mean(r => logLoss(r.pOld, r.over)), coin: Math.log(2)},
     confident: {model55: confident('pModel', 0.05), model60: confident('pModel', 0.1), old55: confident('pOld', 0.05), old60: confident('pOld', 0.1)},

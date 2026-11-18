@@ -69,7 +69,8 @@ export default async function handler(req, res) {
     for (const g of grid) {
       const rows = walk(prep, {...settings, ...g}, options);
       const tr = score(rows.filter(r => !cutoff || r.date < cutoff)), te = score(rows.filter(r => cutoff && r.date >= cutoff));
-      out.push({settings: g, train: {n: tr.n, brier: tr.brier?.model, logLoss: tr.logLoss?.model, mae: tr.mae?.model}, test: {n: te.n, brier: te.brier?.model, logLoss: te.logLoss?.model, mae: te.mae?.model}});
+      const pick = x => ({n: x.n, brier: x.brier?.model, logLoss: x.logLoss?.model, ll: x.likelihood?.model, mae: x.mae?.model, cal: x.calibration?.map(b => [b.bin, b.n, +b.predicted.toFixed(3), +b.actual.toFixed(3)])});
+      out.push({settings: g, train: pick(tr), test: pick(te)});
       if (Date.now() - t0 > 250000) break;
     }
     return res.json({meta, out, seconds: (Date.now() - t0) / 1000});
