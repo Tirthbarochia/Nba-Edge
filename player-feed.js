@@ -106,6 +106,7 @@ async function matchup({player,team,date,metric,season,event,opponent,roster,ath
   if(!model)return null;
   const notes=[];
   if(/questionable|doubtful|out|day/i.test(injury(athlete)))notes.push(athlete.displayName+' is listed '+injury(athlete).toLowerCase()+'.');
+  if(out.length&&!model.steps.some(x=>x.key==='teammates'))notes.push('Out tonight: '+out.map(m=>m.name).join(', ')+'. Not adjusted for: in backtests, adjusting for absent teammates made projections less accurate.');
   const unsure=(roster.athletes||[]).filter(a=>a.id!==player&&/questionable/i.test(injury(a))).map(a=>a.displayName);
   if(unsure.length)notes.push('Questionable, not adjusted for: '+unsure.slice(0,4).join(', ')+'.');
   if(!def)notes.push('Opponent defense data was unavailable.');

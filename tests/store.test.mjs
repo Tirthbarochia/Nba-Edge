@@ -390,7 +390,7 @@ test('the Track record route returns a separate graded record for each model', a
   assert.deepEqual([res.body.site.recent[0].player,res.body.claude.recent[0].player],['Test Player','Second Player']);
 });
 
-test('the Prop analyzer returns a matchup projection with teammates out, venue and opponent', async t => {
+test('the Prop analyzer returns a matchup projection with the opponent adjustment and a teammates-out note', async t => {
   const world = await scenario(t);
   world.injured = true;
   const team = (id, abbr, pts) => ({team:{id, abbreviation:abbr}, categories:[
@@ -406,10 +406,10 @@ test('the Prop analyzer returns a matchup projection with teammates out, venue a
   assert.ok(m, 'projection attached');
   assert.equal(m.home, true);
   const step = key => m.steps.find(s => s.key === key);
-  assert.match(step('teammates').detail, /Second Player out · 4 games without/);
-  assert.ok(step('teammates').change > 0);
+  assert.equal(step('teammates'), undefined);
+  assert.ok(m.notes.some(n => /Out tonight: Second Player/.test(n)));
   assert.match(step('opponent').detail, /BBB allow 125\.0 per game · league 116\.7/);
   assert.ok(step('opponent').change > 0);
-  assert.ok(step('venue'));
+  assert.equal(step('venue'), undefined);
   assert.ok(m.mean > 25);
 });

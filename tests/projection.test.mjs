@@ -40,17 +40,17 @@ test('recent minutes drive the projection when a role changes', () => {
 
 test('teammates out: blends toward games without them, and says so when there are too few', () => {
   const g = games(12, i => ({minutes: 30, value: i < 4 ? 24 : 15, home: true, without: i < 4}));
-  const m = projectStat(g, {teammatesOut:['Star Guard']});
+  const m = projectStat(g, {teammatesOut:['Star Guard']}, {teammates: true});
   const step = m.steps.find(s => s.key === 'teammates');
   assert.ok(step.change > 2, 'usage bump measured');
   assert.match(step.detail, /4 games without/);
-  const few = projectStat(games(12, i => ({minutes:30, value:15, home:true, without:i < 2})), {teammatesOut:['Star Guard']});
+  const few = projectStat(games(12, i => ({minutes:30, value:15, home:true, without:i < 2})), {teammatesOut:['Star Guard']}, {teammates: true});
   assert.equal(few.steps.find(s => s.key === 'teammates').change, 0);
 });
 
 test('home or away is a small, capped effect', () => {
   const g = games(20, i => ({minutes:30, value: i % 2 ? 30 : 10, home: i % 2 === 1}));
-  const home = projectStat(g, {home:true}), road = projectStat(g, {home:false});
+  const home = projectStat(g, {home:true}, {venue: true}), road = projectStat(g, {home:false}, {venue: true});
   const share = s => s.steps.find(x => x.key === 'venue').change / s.baseline;
   assert.ok(share(home) <= 0.0801 && share(home) > 0);
   assert.ok(share(road) >= -0.0801 && share(road) < 0);
@@ -72,4 +72,10 @@ test('PRA adds the three stat projections and keeps a breakdown', () => {
   const all = projectAll(g, {home:true, opponents:{points:{team:'X', allowed:110, league:115, games:12}}});
   near(all.PRA.mean, all.points.mean + all.rebounds.mean + all.assists.mean, 1e-9);
   assert.ok(all.PRA.steps.some(s => s.key === 'opponent'));
+});
+
+test('live settings: teammates-out and home/away adjustments are off, opponent defense is on', () => {
+  const g = games(12, i => ({minutes: 30, value: i < 4 ? 24 : 15, home: i % 2 === 0, without: i < 4}));
+  const m = projectStat(g, {home: true, teammatesOut: ['Star Guard'], opponent: {team: 'X', allowed: 120, league: 115, games: 20}});
+  assert.deepEqual(m.steps.map(s => s.key), ['opponent']);
 });
