@@ -102,7 +102,8 @@ export function walk(prep, settings = {}, {minGames = 5, minMinutes = 20} = {}) 
       const all = projectAll(games, {home: g[HOME] === 1, opponents, teammatesOut: out.map(m => m.id)}, settings);
       for (const s of STATS) {
         const m = all[s];
-        if (!m || m.projectedMinutes < minMinutes) continue;
+        // The same games are scored for every setting: rotation players (20+ minutes over their last five).
+        if (!m || prior.slice(0, 5).reduce((t, x) => t + x[MIN], 0) / Math.min(5, prior.length) < minMinutes) continue;
         const values = games.map(x => x.values[s]);
         const last10 = values.slice(0, 10).reduce((a, b) => a + b, 0) / Math.min(10, values.length);
         const actual = g[COL[s]];
