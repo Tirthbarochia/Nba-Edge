@@ -135,7 +135,7 @@ async function insights(date, day, now) {
     const events = (await db('GET', 'odds_events', {query: today(date)}))
       .filter(e => e.ok && Date.parse(e.fetched_at) === taken && Date.parse(e.tip) > now);
     const picks = await generate(date, events.map(e => ({home:e.home, away:e.away, tip:e.tip, rows:e.rows})), taken);
-    const earlier = await db('GET', 'insight_picks', {query:{...today(date), select:'pick_key,active,pick'}});
+    const earlier = await db('GET', 'insight_picks', {query:{...today(date), author:'eq.site', select:'pick_key,active,pick'}});
     const existing = new Set(earlier.map(r => r.pick_key));
     const one = pick_key => ({...today(date), pick_key:'eq.' + pick_key});
     const fresh = [], confirmed = new Set();
@@ -179,8 +179,8 @@ export async function slate(date, now = Date.now()) {
 export async function eventRows(date, event) {
   return (await db('GET', 'odds_events', {query:{...today(date), event_id:'eq.' + event, select:'rows,tip,fetched_at'}}))[0] || null;
 }
-export async function savedPicks(date) {
-  return db('GET', 'insight_picks', {query:{...today(date), order:'first_suggested_at.asc'}});
+export async function savedPicks(date, author = 'site') {
+  return db('GET', 'insight_picks', {query:{...today(date), author:'eq.' + author, order:'first_suggested_at.asc'}});
 }
 
 // Signed-in Odds scanner: a small separate daily allowance, recorded against the same day row.

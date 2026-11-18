@@ -15,8 +15,10 @@ export default async function handler(req,res) {
     await grade().catch(error=>console.warn('grading',String(error?.message||error).slice(0,160)));
     const picks=(await savedPicks(date)).map(r=>({...r.pick,key:r.pick_key,active:r.active,suggested:r.first_suggested_at,confirmed:r.last_confirmed_at,result:r.result||null,actual:r.actual==null?null:Number(r.actual)}));
     picks.sort((a,b)=>b.active-a.active || b.consensus-a.consensus);
-    const track=await record().catch(()=>null);
+    const track=await record('site').catch(()=>null);
+    // Claude's researched picks: published by a daily research session, graded separately.
+    const claude=await Promise.all([savedPicks(date,'claude'),record('claude')]).then(([rows,rec])=>({picks:rows.map(r=>({...r.pick,key:r.pick_key,suggested:r.first_suggested_at,result:r.result||null,actual:r.actual==null?null:Number(r.actual)})),record:rec})).catch(()=>null);
     res.setHeader('Cache-Control','public,max-age=0,s-maxage=120');
-    return res.json({date,status,startHour,updated:day?.fetched_at||null,games:day?.games||0,covered:day?.covered||0,screened:Boolean(day?.insights_at),picks,record:track});
+    return res.json({date,status,startHour,updated:day?.fetched_at||null,games:day?.games||0,covered:day?.covered||0,screened:Boolean(day?.insights_at),picks,record:track,claude});
   } catch {return res.status(503).json({error:'Daily insights are temporarily unavailable.'});}
 }

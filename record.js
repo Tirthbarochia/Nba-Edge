@@ -71,7 +71,7 @@ export function summarize(rows, now = Date.now()) {
   };
 }
 
-export async function record(now = Date.now()) {
-  const rows = await db('GET', 'insight_picks', {query:{select:'slate_date,pick_key,player,metric,line,side,first_pick,first_suggested_at,result,actual', order:'slate_date.asc'}});
+export async function record(author = 'site', now = Date.now()) {
+  const rows = await db('GET', 'insight_picks', {query:{author:'eq.' + author, select:'slate_date,pick_key,player,metric,line,side,first_pick,first_suggested_at,result,actual', order:'slate_date.asc'}});
   return summarize(rows, now);
 }

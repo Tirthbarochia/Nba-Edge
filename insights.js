@@ -24,9 +24,15 @@ function trackRecord(r){
   const small=total<30?'<p class="notice">Small sample: '+total+' decided pick'+(total===1?'':'s')+' so far. A record this short says little about future results.</p>':'';
   return tiles+days+table+small;
 }
+function claudePicks(c,date){
+  if(!c)return '<p class="muted">Claude’s picks are unavailable right now.</p>';
+  const cards=c.picks.map(p=>'<div class="insight" style="margin-bottom:10px"><div class="insight-tag">'+esc(p.away)+' AT '+esc(p.home)+' · '+fmt(p.tip)+' ET'+(p.result?' · <span class="status-chip '+chip[p.result]+'">'+graded(p)+'</span>':'')+'</div><strong>'+esc(p.player)+' · '+esc(p.side)+' '+p.line+' '+esc(p.metric)+' · '+(p.price>0?'+':'')+p.price+' '+esc(p.book)+'</strong><p>'+esc(p.reason)+'</p></div>').join('');
+  const none='<p class="muted">'+(new Date().toLocaleTimeString('en-US',{timeZone:'America/New_York',hour:'numeric',hour12:false})<16?'Today’s picks are posted around 4 PM ET.':'No pick today. Nothing stood out enough after the research.')+'</p>';
+  return (cards||none)+'<h3 style="font-size:15px;margin:18px 0 12px">Claude’s track record</h3>'+trackRecord(c.record);
+}
 class DailyInsights extends HTMLElement {
   connectedCallback(){
-    this.innerHTML='<section class="card" style="margin-bottom:20px"><div class="card-body"><h1 class="page-title">Today’s Insights</h1><p data-info aria-live="polite">Comparing today’s sportsbook markets…</p><div data-layout style="display:flex;gap:18px;flex-wrap:wrap"><div data-list style="flex:1 1 210px;max-height:350px;overflow:auto"></div><div data-detail style="flex:2 1 280px;min-width:0"></div></div></div></section><section class="card" style="margin-bottom:20px"><div class="card-body"><h2 class="page-title" style="font-size:22px">Track record</h2><p class="muted small-text">Every insight this site has published, graded against the final box score at the line it was first suggested. Over wins above the line, Under below it. Pushes and players who sit out don’t count.</p><div data-record aria-live="polite"></div></div></section>';
+    this.innerHTML='<section class="card" style="margin-bottom:20px"><div class="card-body"><h1 class="page-title">Today’s Insights</h1><p data-info aria-live="polite">Comparing today’s sportsbook markets…</p><div data-layout style="display:flex;gap:18px;flex-wrap:wrap"><div data-list style="flex:1 1 210px;max-height:350px;overflow:auto"></div><div data-detail style="flex:2 1 280px;min-width:0"></div></div></div></section><section class="card" style="margin-bottom:20px"><div class="card-body"><h2 class="page-title" style="font-size:22px">Track record</h2><p class="muted small-text">Every insight this site has published, graded against the final box score at the line it was first suggested. Over wins above the line, Under below it. Pushes and players who sit out don’t count.</p><div data-record aria-live="polite"></div></div></section><section class="card" style="margin-bottom:20px"><div class="card-body"><h2 class="page-title" style="font-size:22px">Claude’s picks</h2><p class="muted small-text">Lines chosen each afternoon by Claude, an AI model, after reading injury news, rotation changes and matchups against today’s saved sportsbook prices. Graded the same way, with a separate record. This is research, not a guarantee.</p><div data-claude aria-live="polite"></div></div></section>';
     this.refresh();this.timer=setInterval(()=>this.refresh(),300000);
   }
   disconnectedCallback(){clearInterval(this.timer);}
@@ -37,6 +43,7 @@ class DailyInsights extends HTMLElement {
       if(!response.ok)throw Error();
       const data=await response.json();
       this.querySelector('[data-record]').innerHTML=trackRecord(data.record);
+      this.querySelector('[data-claude]').innerHTML=claudePicks(data.claude,data.date);
       const today=new Intl.DateTimeFormat('en-CA',{timeZone:'America/New_York',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
       const picks=data.date===today?data.picks:[];
       const messages={scheduled:'Today’s sportsbook lines are saved at about '+hour(data.startHour)+' ET. Insights appear after that.',pending:'Today’s update is on its way. Check back in a few minutes.','no-games':'No upcoming NBA games were found for today.','no-lines':'Sportsbooks have not posted today’s player lines yet. It will be checked again.',allowance:'Today’s update was skipped because the sportsbook data allowance is used up.',provider:'The sportsbook feed could not be reached. It will be retried.'};
@@ -52,7 +59,7 @@ class DailyInsights extends HTMLElement {
       };
       for(const p of picks){const b=document.createElement('button');b.className='btn';b.style.cssText='display:block;width:100%;text-align:left;margin:0 0 5px;white-space:normal';b.textContent=p.player+' · '+p.side+' '+p.line+' '+p.metric+' · '+p.hits10+'/10 · '+tag(p);b.onclick=()=>show(p,b);list.append(b);}
       list.children[Math.max(0,picks.findIndex(p=>p.key===this.selected))].click();
-    }catch{info.textContent='Insights are unavailable. The next refresh will retry.';list.replaceChildren();detail.replaceChildren();this.querySelector('[data-record]').textContent='';}
+    }catch{info.textContent='Insights are unavailable. The next refresh will retry.';list.replaceChildren();detail.replaceChildren();this.querySelector('[data-record]').textContent='';this.querySelector('[data-claude]').textContent='';}
   }
 }
 customElements.define('nba-insights',DailyInsights);

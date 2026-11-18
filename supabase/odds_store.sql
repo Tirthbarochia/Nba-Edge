@@ -102,3 +102,38 @@ create policy "insight_picks_server_only" on public.insight_picks for all to ano
 -- After running this file, store the hash of the server token once (replace the value):
 --   insert into private.server_token (sha256) values ('<64 hex characters>')
 --   on conflict (singleton) do update set sha256 = excluded.sha256;
+
+alter table public.insight_picks add column if not exists author text not null default 'site' check (author in ('site','claude'));
+
+-- Claude's researched picks are published only through this function. It accepts a line only
+-- if it exists in today's saved sportsbook copy (so the price is never typed in by hand), only
+-- for a game that has not started, only with a written reason, and at most five a day.
+create or replace function private.publish_claude_pick(p_player text, p_metric text, p_line numeric, p_side text, p_book text, p_reason text)
+returns text language plpgsql security definer set search_path = '' as $$
+declare
+  d date := (now() at time zone 'America/New_York')::date;
+  v_home text; v_away text; v_tip timestamptz; v_fetched timestamptz; v_row jsonb;
+  q jsonb; k text; n int;
+begin
+  if p_side not in ('Over','Under') then raise exception 'side must be Over or Under'; end if;
+  if p_metric not in ('points','rebounds','assists') then raise exception 'metric must be points, rebounds or assists'; end if;
+  if length(coalesce(p_reason,'')) < 40 or length(p_reason) > 700 then raise exception 'reason must be 40 to 700 characters'; end if;
+  select count(*) into n from public.insight_picks where slate_date = d and author = 'claude';
+  if n >= 5 then raise exception 'daily limit of 5 Claude picks reached'; end if;
+  select ev.home, ev.away, ev.tip, ev.fetched_at, r into v_home, v_away, v_tip, v_fetched, v_row
+    from public.odds_events ev, jsonb_array_elements(ev.rows) r
+    where ev.slate_date = d and lower(r->>'player') = lower(p_player) and r->>'metric' = p_metric
+      and (r->>'line')::numeric = p_line and lower(r->>'book') = lower(p_book) and r ? p_side
+    order by ev.fetched_at desc limit 1;
+  if v_row is null then raise exception 'no saved % line for % % % at %', p_side, p_player, p_line, p_metric, p_book; end if;
+  if v_tip <= now() then raise exception 'that game has already started'; end if;
+  k := 'claude_' || regexp_replace(lower(v_row->>'player'), '[^a-z0-9]', '', 'g') || '_' || p_metric || '_' || replace(p_line::text, '.', 'p') || '_' || lower(p_side);
+  q := jsonb_build_object('player', v_row->>'player', 'metric', p_metric, 'line', p_line, 'side', p_side,
+    'price', (v_row->>p_side)::numeric, 'book', v_row->>'book', 'Over', v_row->'Over', 'Under', v_row->'Under',
+    'updated', v_fetched, 'home', v_home, 'away', v_away, 'tip', v_tip, 'reason', p_reason, 'author', 'claude');
+  insert into public.insight_picks (slate_date, pick_key, player, metric, line, side, first_pick, pick, first_suggested_at, last_confirmed_at, active, author)
+    values (d, k, v_row->>'player', p_metric, p_line, p_side, q, q, now(), now(), true, 'claude')
+    on conflict (slate_date, pick_key) do nothing;
+  return k;
+end $$;
+revoke all on function private.publish_claude_pick(text, text, numeric, text, text, text) from public, anon, authenticated;

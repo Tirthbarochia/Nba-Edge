@@ -50,7 +50,7 @@ function fakeWorld() {
     }
     for (const item of [].concat(body)) {
       const existing = rows.find(r => keys[table].every(k => r[k] === item[k]));
-      if (!existing) rows.push({...defaults[table],...(table==='insight_picks'?{active:true}:{}),...item});
+      if (!existing) rows.push({...defaults[table],...(table==='insight_picks'?{active:true,author:'site'}:{}),...item});
       else if (prefer.includes('merge-duplicates')) Object.assign(existing,item);
       else assert.ok(prefer.includes('ignore-duplicates'),'duplicate insert without a conflict rule');
     }
@@ -344,4 +344,25 @@ test('picks saved before player ids were stored are matched by name for grading'
   t.mock.timers.setTime(Date.parse(TIP) + 4*3600000);
   const r = (await world.insights()).body.record;
   assert.deepEqual([r.misses,r.recent[0].actual],[1,20]);
+});
+
+test("Claude's picks are listed and graded separately and are never touched by the site's refresh", async t => {
+  const world = await scenario(t,{env:{ODDS_REFRESHES_PER_DAY:'2'}});
+  await world.insights();
+  const claude = {slate_date:'2026-11-15',pick_key:'claude_secondplayer_points_20p5_under',player:'Second Player',metric:'points',line:20.5,side:'Under',author:'claude',active:true,
+    first_pick:{player:'Second Player',metric:'points',line:20.5,side:'Under',price:120,book:'A',home:'AAA Team',away:'BBB Team',tip:TIP,reason:'Minutes drop expected with the starter back from injury tonight.'},
+    first_suggested_at:'2026-11-15T20:00:00.000Z',last_confirmed_at:'2026-11-15T20:00:00.000Z'};
+  claude.pick = claude.first_pick;
+  world.tables.insight_picks.push(claude);
+  t.mock.timers.setTime(NOON + 61*60000);
+  world.books = [...world.lines.flat];
+  const res = await world.insights();
+  assert.deepEqual(res.body.picks.map(p => p.player),['Test Player'],'site list excludes Claude picks');
+  assert.equal(res.body.claude.picks[0].reason,'Minutes drop expected with the starter back from injury tonight.');
+  assert.equal(world.tables.insight_picks.find(r => r.author === 'claude').active,true,'the site refresh never deactivates a Claude pick');
+  world.final = {'101':25,'102':18};
+  t.mock.timers.setTime(Date.parse(TIP) + 4*3600000);
+  const later = await world.insights();
+  assert.deepEqual([later.body.record.hits,later.body.record.misses],[1,0]);
+  assert.deepEqual([later.body.claude.record.hits,later.body.claude.record.units,later.body.claude.picks[0].result],[1,1.2,'hit']);
 });
