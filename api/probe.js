@@ -8,6 +8,7 @@ export default async function handler(req, res) {
   const path = String(req.query.p || '').split('.').filter(Boolean);
   let data; try { data = JSON.parse(text); } catch { return res.status(200).json({status:r.status, text:text.slice(0,2000)}); }
   for (const key of path) data = data?.[key];
+  if (req.query.q && Array.isArray(data)) data = data.filter(x => JSON.stringify(x).includes(String(req.query.q))).map(x => req.query.k ? Object.fromEntries(String(req.query.k).split(',').map(k => [k, x?.[k]])) : x);
   const shape = (v, d=0) => d > Number(req.query.d || 2) ? typeof v : Array.isArray(v) ? [v.length, shape(v[0], d+1)] : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).slice(0, 40).map(([k, x]) => [k, shape(x, d+1)])) : v;
   res.json({status:r.status, shape: req.query.raw ? JSON.stringify(data).slice(0, Number(req.query.n || 6000)) : shape(data)});
 }
